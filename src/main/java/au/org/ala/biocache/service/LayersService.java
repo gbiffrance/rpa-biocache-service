@@ -13,6 +13,9 @@
  *  rights and limitations under the License.
  ***************************************************************************/
 package au.org.ala.biocache.service;
+
+import java.io.Reader;
+
 /**
  * Provides access to the layers metadata information that could be of use elsewhere.
  *  
@@ -42,4 +45,8 @@ public interface LayersService {
     Integer getTracksCount(String lsid);
 
     void refreshCache();
+
+    String getLayersServiceUrl();
+
+    Reader sample(String[] analysisLayers, double[][] points, Object o);
 }

@@ -40,6 +40,16 @@ public class SearchRequestParams {
     protected String[] formattedFq = {}; // must not be null
 
     /**
+     * Request parameters version.
+     *
+     * version 1.0 (version==null || version==1.0)
+     *  - biocache-store SOLR schema fields in requests are compatible with pipeline SOLR schema.
+     * version 2.0
+     *  - No pipeline field substitutions.
+     */
+    protected Double version = null;
+
+    /**
      * When the default OccurrenceIndex mapped SOLR fields are stored=false and docValues=true fl must include them
      */
     protected String fl = OccurrenceIndex.defaultFields;
@@ -133,6 +143,9 @@ public class SearchRequestParams {
             req.append("&foffset=").append(foffset);
         if(!"".equals(fprefix))
             req.append("&fprefix=").append(fprefix);
+
+        if(!"".equals(version))
+            req.append("&version=").append(version);
 
         return req.toString();
     }
@@ -454,6 +467,14 @@ public class SearchRequestParams {
         this.formattedFq = formattedFq;
     }
 
+    public Double getVersion() {
+	    return version;
+    }
+
+    public void setVersion(Double version) {
+	    this.version = version;
+    }
+
   /* (non-Javadoc)
    * @see java.lang.Object#hashCode()
    */
@@ -479,6 +500,7 @@ public class SearchRequestParams {
       result = prime * result + ((qc == null) ? 0 : qc.hashCode());
       result = prime * result + ((sort == null) ? 0 : sort.hashCode());
       result = prime * result + ((start == null) ? 0 : start.hashCode());
+      result = prime * result + ((version == null) ? 0 : version.hashCode());
       return result;
   }
  

@@ -16,15 +16,12 @@ package au.org.ala.biocache.dao;
 
 import au.com.bytecode.opencsv.CSVReader;
 import au.com.bytecode.opencsv.CSVWriter;
-import au.org.ala.biocache.Config;
-import au.org.ala.biocache.RecordWriter;
-import au.org.ala.biocache.Store;
+
 import au.org.ala.biocache.dto.*;
 import au.org.ala.biocache.service.*;
 import au.org.ala.biocache.stream.OptionalZipOutputStream;
 import au.org.ala.biocache.util.*;
 import au.org.ala.biocache.util.thread.EndemicCallable;
-import au.org.ala.biocache.vocab.ErrorCode;
 import au.org.ala.biocache.writer.*;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
@@ -40,7 +37,6 @@ import org.apache.solr.client.solrj.SolrQuery;
 import org.apache.solr.client.solrj.SolrRequest;
 import org.apache.solr.client.solrj.SolrServerException;
 import org.apache.solr.client.solrj.beans.Field;
-import org.apache.solr.client.solrj.embedded.EmbeddedSolrServer;
 import org.apache.solr.client.solrj.impl.CloudSolrClient;
 import org.apache.solr.client.solrj.response.*;
 import org.apache.solr.client.solrj.response.FacetField.Count;
@@ -107,7 +103,6 @@ public class SearchDAOImpl implements SearchDAO {
     //sensitive fields and their non-sensitive replacements
     public static final String[] sensitiveCassandraHdr = {"decimalLongitude", "decimalLatitude", "verbatimLocality"};
     public static final String[] sensitiveSOLRHdr = {"sensitive_longitude", "sensitive_latitude", "sensitive_locality", "sensitive_event_date", "sensitive_event_date_end", "sensitive_grid_reference"};
-    public static final String[] notSensitiveCassandraHdr = {"decimalLongitude_p", "decimalLatitude_p", "locality"};
     public static final String[] notSensitiveSOLRHdr = {"longitude", "latitude", "locality"};
     public static final String CONTAINS_SENSITIVE_PATTERN = StringUtils.join(sensitiveSOLRHdr, "|");
 
@@ -134,9 +129,11 @@ public class SearchDAOImpl implements SearchDAO {
      * SOLR client instance
      */
     @Inject
-    protected SolrClient solrClient;
+    protected IndexDAO indexDao;
 
-    protected SolrRequest.METHOD queryMethod;
+    @Inject
+    protected OccurrenceUtils occurrenceUtils;
+
     /**
      * Limit search results - for performance reasons
      */
@@ -188,28 +185,13 @@ public class SearchDAOImpl implements SearchDAO {
     protected static final Integer FACET_PAGE_SIZE = 1000;
     protected static final String RANGE_SUFFIX = "_RNG";
 
-    private String spatialField = "geohash";
+    final private String spatialField = "geohash";
 
-    protected Pattern layersPattern = Pattern.compile("(el|cl)[0-9abc]+");
     protected Pattern clpField = Pattern.compile("(,|^)cl.p(,|$)");
     protected Pattern elpField = Pattern.compile("(,|^)el.p(,|$)");
     protected Pattern allDwcField = Pattern.compile("(,|^)allDwc(,|$)");
 
-    /**
-     * solr connection retry limit
-     **/
-    @Value("${solr.server.retry.max:6}")
-    protected int maxRetries = 6;
-    /**
-     * solr connection wait time between retries in ms
-     **/
-    @Value("${solr.server.retry.wait:50}")
-    protected long retryWait = 50;
-    /**
-     * solr index version refresh time in ms, 5*60*1000
-     **/
-    @Value("${solr.server.indexVersion.refresh:300000}")
-    protected int solrIndexVersionRefreshTime = 300000;
+
 
     @Value("${shapefile.tmp.dir:/data/biocache-download/tmp}")
     protected String tmpShapefileDir;
@@ -316,34 +298,8 @@ public class SearchDAOImpl implements SearchDAO {
     @Value("${default.download.fields:id,data_resource_uid,data_resource,license,catalogue_number,taxon_concept_lsid,raw_taxon_name,raw_common_name,taxon_name,rank,common_name,kingdom,phylum,class,order,family,genus,species,subspecies,institution_code,collection_code,locality,raw_latitude,raw_longitude,raw_datum,latitude,longitude,coordinate_precision,coordinate_uncertainty,country,state,cl959,min_elevation_d,max_elevation_d,min_depth_d,max_depth_d,individual_count,recorded_by,year,month,day,verbatim_event_date,basis_of_record,raw_basis_of_record,sex,preparations,information_withheld,data_generalizations,outlier_layer,taxonomic_kosher,geospatial_kosher}")
     protected String defaultDownloadFields;
 
-    /**
-     * A list of fields that are left in the index for legacy reasons, but are removed from the public API to avoid confusion.
-     */
-    @Value("${index.fields.tohide:collector_text,location_determined,row_key,matched_name,decimal_latitudelatitude,collectors,default_values_used,generalisation_to_apply_in_metres,geohash,ibra_subregion,identifier_by,occurrence_details,text,photo_page_url,photographer,places,portal_id,quad,rem_text,occurrence_status_s,identification_qualifier_s}")
-    protected String indexFieldsToHide;
-
-    private volatile Set<IndexFieldDTO> indexFields = new ConcurrentHashSet<IndexFieldDTO>(); //RestartDataService.get(this, "indexFields", new TypeReference<TreeSet<IndexFieldDTO>>(){}, TreeSet.class);
-    private volatile Map<String, IndexFieldDTO> indexFieldMap = RestartDataService.get(this, "indexFieldMap", new TypeReference<HashMap<String, IndexFieldDTO>>(){}, HashMap.class);
-    private final Map<String, StatsIndexFieldDTO> rangeFieldCache = new HashMap<String, StatsIndexFieldDTO>();
-
-    /**
-     * SOLR index version for client app caching use.
-     */
-    private volatile long solrIndexVersion = 0;
-    /**
-     * last time SOLR index version was refreshed
-     */
-    private volatile long solrIndexVersionTime = 0;
-    /**
-     * Lock object used to synchronize updates to the solr index version
-     */
-    private final Object solrIndexVersionLock = new Object();
-
     @Value("${wms.colour:0x00000000}")
     protected int DEFAULT_COLOUR;
-
-    @Value("${dwc.url:http://rs.tdwg.org/dwc/terms/}")
-    protected String dwcUrl = "http://rs.tdwg.org/dwc/terms/";
 
     /**
      * max.boolean.clauses is automatically determined when set to 0
@@ -368,10 +324,8 @@ public class SearchDAOImpl implements SearchDAO {
 
         logger.debug("Initialising SearchDAOImpl");
 
-        queryMethod = solrClient instanceof EmbeddedSolrServer ? SolrRequest.METHOD.GET : SolrRequest.METHOD.POST;
-
         // TODO: There was a note about possible issues with the following two lines
-        Set<IndexFieldDTO> indexedFields = getIndexedFields();
+        Set<IndexFieldDTO> indexedFields = indexDao.getIndexedFields();
         if (downloadFields == null) {
             downloadFields = new DownloadFields(indexedFields, messageSource, layersService, listsService);
         } else {
@@ -379,15 +333,6 @@ public class SearchDAOImpl implements SearchDAO {
         }
 
         getMaxBooleanClauses();
-    }
-
-    @PreDestroy
-    public void destroy() throws Exception {
-        // close SOLR connection
-        solrClient.close();
-
-        // close Cassandra connection
-        Config.persistenceManager().shutdown();
     }
 
     public void refreshCaches() {
@@ -399,11 +344,9 @@ public class SearchDAOImpl implements SearchDAO {
         }
 
         collectionCache.updateCache();
-        //empties the range cache to allow the settings to be recalculated.
-        rangeFieldCache.clear();
         try {
             //update indexed fields
-            downloadFields.update(getIndexedFields(true));
+            downloadFields.update(indexDao.getIndexedFields(true));
         } catch (Exception e) {
             logger.error("Unable to refresh cache.", e);
         }
@@ -713,9 +656,14 @@ public class SearchDAOImpl implements SearchDAO {
             SolrQuery solrQuery = initSolrQuery(searchParams, true, extraParams); // general search settings
             solrQuery.setQuery(queryString);
 
-            QueryResponse qr = runSolrQuery(solrQuery, searchParams);
+            QueryResponse qr = indexDao.runSolrQuery(solrQuery, searchParams);
             //need to set the original q to the processed value so that we remove the wkt etc that is added from paramcache object
-            Class resultClass = includeSensitive ? au.org.ala.biocache.dto.SensitiveOccurrenceIndex.class : OccurrenceIndex.class;
+            Class resultClass;
+            if (searchParams.getVersion() == 2.0) {
+                resultClass = includeSensitive ? au.org.ala.biocache.dto.SensitiveOccurrenceIndex.class : OccurrenceIndex.class;
+            } else {
+                resultClass = includeSensitive ? au.org.ala.biocache.dto.SensitiveOccurrenceIndex.class : OccurrenceIndex10.class;
+            }
             searchResults = processSolrResponse(original, qr, solrQuery, resultClass);
             searchResults.setQueryTitle(searchParams.getDisplayString());
             searchResults.setUrlParameters(original.getUrlParams());
@@ -803,7 +751,7 @@ public class SearchDAOImpl implements SearchDAO {
             dd.resetCounts();
         }
 
-        QueryResponse qr = runSolrQuery(solrQuery, searchParams);
+        QueryResponse qr = indexDao.runSolrQuery(solrQuery, searchParams);
         if (logger.isDebugEnabled()) {
             logger.debug("Retrieved facet results from server...");
         }
@@ -883,7 +831,7 @@ public class SearchDAOImpl implements SearchDAO {
                         //get the next values
                         solrQuery.remove("facet.offset");
                         solrQuery.add("facet.offset", Integer.toString(offset));
-                        qr = runSolrQuery(solrQuery, searchParams);
+                        qr = indexDao.runSolrQuery(solrQuery, searchParams);
                         ff = qr.getFacetField(searchParams.getFacets()[0]);
                     }
                 } finally {
@@ -932,7 +880,7 @@ public class SearchDAOImpl implements SearchDAO {
         solrQuery.setRows(0);
         solrQuery.setQuery(searchParams.getQ());
 
-        QueryResponse qr = runSolrQuery(solrQuery, srp);
+        QueryResponse qr = indexDao.runSolrQuery(solrQuery, srp);
         if (qr.getResults().size() > 0) {
             FacetField ff = qr.getFacetField(searchParams.getFacets()[0]);
             if (ff != null && ff.getValueCount() > 0) {
@@ -1125,7 +1073,7 @@ public class SearchDAOImpl implements SearchDAO {
 
             // include all misc fields if required
             if (dd.getRequestParams() != null ? dd.getRequestParams().getIncludeMisc() : false) {
-                for (IndexFieldDTO f : indexFields) {
+                for (IndexFieldDTO f : indexDao.getIndexFieldDetails()) {
                     // identify misc fields that are in the index
                     if (f.isStored() && f.getName() != null && f.getName().startsWith("_"))
                         solrQuery.addField(f.getName());
@@ -1394,7 +1342,7 @@ public class SearchDAOImpl implements SearchDAO {
 
                             splitByFacetQuery.setFilterQueries(fq);
 
-                            QueryResponse qr = runSolrQueryWithCursorMark(splitByFacetQuery, downloadBatchSize, null);
+                            QueryResponse qr = runSolrQueryWithCursorMark(splitByFacetQuery, downloadParams.getVersion(), downloadBatchSize, null);
                             AtomicInteger recordsForThread = new AtomicInteger(0);
                             if (logger.isDebugEnabled()) {
                                 logger.debug(splitByFacetQuery.getQuery() + " - results: " + qr.getResults().size());
@@ -1419,7 +1367,7 @@ public class SearchDAOImpl implements SearchDAO {
                                         // throttle the download by sleeping
                                         Thread.sleep(localThrottle);
                                     }
-                                    qr = runSolrQueryWithCursorMark(splitByFacetQuery, downloadBatchSize, qr.getNextCursorMark());
+                                    qr = runSolrQueryWithCursorMark(splitByFacetQuery, downloadParams.getVersion(), downloadBatchSize, qr.getNextCursorMark());
                                 } else {
                                     qr = null;
                                 }
@@ -1579,8 +1527,7 @@ public class SearchDAOImpl implements SearchDAO {
                 }
 
                 if (invalid < results.size()) {
-                    LayersStore ls = new LayersStore(layersServiceUrl);
-                    Reader reader = ls.sample(analysisLayers, points, null);
+                    Reader reader = layersService.sample(analysisLayers, points, null);
 
                     CSVReader csv = new CSVReader(reader);
                     intersection = csv.readAll();
@@ -1747,183 +1694,6 @@ public class SearchDAOImpl implements SearchDAO {
     }
 
     /**
-     * Note - this method extracts from CASSANDRA rather than the Index.
-     */
-    public ConcurrentMap<String, AtomicInteger> writeResultsToStream(
-            DownloadRequestParams downloadParams, OutputStream out, int i,
-            boolean includeSensitive, DownloadDetailsDTO dd, boolean limit) throws Exception {
-        expandRequestedFields(downloadParams, false);
-
-        int resultsCount = 0;
-        ConcurrentMap<String, AtomicInteger> uidStats = new ConcurrentHashMap<>();
-        //stores the remaining limit for data resources that have a download limit
-        Map<String, Integer> downloadLimit = new HashMap<>();
-
-        try {
-            SolrQuery solrQuery = initSolrQuery(downloadParams, false, null);
-            //ensure that the qa facet is being ordered alphabetically so that the order is consistent.
-            boolean getAssertionsFromFacets = "all".equals(downloadParams.getQa()) || "includeall".equals(downloadParams.getQa());
-            if (getAssertionsFromFacets) {
-                //set the order for the facet to be based on the index - this will force the assertions to be returned in the same order each time
-                //based on alphabetical sort.  The number of QA's may change between searches so we can't guarantee that the order won't change
-                solrQuery.add("f.assertions.facet.sort", "index");
-            }
-            queryFormatUtils.formatSearchQuery(downloadParams);
-            if (logger.isInfoEnabled()) {
-                logger.info("search query: " + downloadParams.getFormattedQuery());
-            }
-            solrQuery.setQuery(downloadParams.getFormattedQuery());
-            //Only the fields specified below will be included in the results from the SOLR Query
-            solrQuery.setFields("id", "institution_uid", "collection_uid", "data_resource_uid", "data_provider_uid");
-
-            String dFields = getDownloadFields(downloadParams);
-
-            if (includeSensitive) {
-                //include raw latitude and longitudes
-                dFields = dFields.replaceFirst("decimalLatitude_p", "decimalLatitude,decimalLongitude,decimalLatitude_p").replaceFirst(",locality,", ",locality,sensitive_locality,");
-            }
-
-            StringBuilder sb = new StringBuilder(dFields);
-            if (downloadParams.getExtra().length() > 0) {
-                sb.append(",").append(downloadParams.getExtra());
-            }
-            StringBuilder qasb = new StringBuilder();
-
-            solrQuery.setFacet(true);
-            QueryResponse qr = runSolrQuery(solrQuery, downloadParams.getFormattedFq(), 0, 0, "", "");
-            dd.setTotalRecords(qr.getResults().getNumFound());
-            //get the assertion facets to add them to the download fields
-            List<FacetField> facets = qr.getFacetFields();
-            for (FacetField facet : facets) {
-                if (facet.getName().equals("assertions") && facet.getValueCount() > 0) {
-                    qasb.append(getQAFromFacet(facet));
-                } else if (facet.getName().equals("data_resource_uid") && checkDownloadLimits) {
-                    //populate the download limit
-                    initDownloadLimits(downloadLimit, facet);
-                }
-            }
-
-            if ("includeall".equals(downloadParams.getQa())) {
-                qasb = getAllQAFields();
-            }
-
-            //Write the header line
-            String qas = qasb.toString();
-
-            List<String>[] indexedFields = downloadFields.getIndexFields(getDownloadFields(downloadParams).split(","), false, downloadParams.getLayersServiceUrl());
-
-            String[] fields = sb.toString().split(",");
-
-            //avoid analysis field and species list duplicates
-            for (String s : indexedFields[5]) fields = (String[]) ArrayUtils.removeElement(fields, s);
-            for (String s : indexedFields[7])
-                fields = (String[]) ArrayUtils.removeElement(fields, s.split("\\.", 2)[0]);
-
-            String[] qaFields = qas.equals("") ? new String[]{} : qas.split(",");
-            String[] qaTitles = downloadFields.getHeader(qaFields, false, false);
-            String[] titles = downloadFields.getHeader(fields, true, downloadParams.getDwcHeaders());
-            String[] analysisHeaders = indexedFields[4].toArray(new String[0]);
-            String[] analysisFields = indexedFields[5].toArray(new String[0]);
-            String[] speciesListHeaders = indexedFields[6].toArray(new String[0]);
-            String[] speciesListFields = indexedFields[7].toArray(new String[0]);
-
-            //apply custom header
-            String[] customHeader = dd.getRequestParams().getCustomHeader().split(",");
-            for (i = 0; i + 1 < customHeader.length; i += 2) {
-                for (int j = 0; j < analysisFields.length; j++) {
-                    if (customHeader[i].equals(analysisFields[j])) {
-                        analysisFields[j] = customHeader[i + 1];
-                    }
-                }
-                for (int j = 0; j < qaFields.length; j++) {
-                    if (customHeader[i].equals(qaFields[j])) {
-                        qaTitles[j] = customHeader[i + 1];
-                    }
-                }
-                for (int j = 0; j < fields.length; j++) {
-                    if (customHeader[i].equals(fields[j])) {
-                        titles[j] = customHeader[i + 1];
-                    }
-                }
-            }
-
-            //append sensitive fields for the header only
-            if (!includeSensitive && dd.getSensitiveFq() != null) {
-                //sensitive headers do not have a DwC name, always set getIndexFields dwcHeader=false
-                List<String>[] sensitiveHdr = downloadFields.getIndexFields(sensitiveSOLRHdr, false, downloadParams.getLayersServiceUrl());
-
-                titles = org.apache.commons.lang3.ArrayUtils.addAll(titles, sensitiveHdr[2].toArray(new String[]{}));
-            }
-            String[] header = org.apache.commons.lang3.ArrayUtils.addAll(titles, analysisHeaders);
-            header = org.apache.commons.lang3.ArrayUtils.addAll(header, speciesListHeaders);
-            header = org.apache.commons.lang3.ArrayUtils.addAll(header, qaTitles);
-
-            //Create the Writer that will be used to format the records
-            //construct correct RecordWriter based on the supplied fileType
-            final RecordWriterError rw = downloadParams.getFileType().equals("csv") ?
-                    new CSVRecordWriter(out, header, downloadParams.getSep(), downloadParams.getEsc()) :
-                    (downloadParams.getFileType().equals("tsv") ? new TSVRecordWriter(out, header) :
-                            new ShapeFileRecordWriter(tmpShapefileDir, downloadParams.getFile(), out, (String[]) ArrayUtils.addAll(fields, qaFields)));
-
-            try {
-                rw.initialise();
-                if (rw instanceof ShapeFileRecordWriter) {
-                    dd.setHeaderMap(((ShapeFileRecordWriter) rw).getHeaderMappings());
-                }
-
-                //retain output header fields and field names for inclusion of header info in the download
-                StringBuilder infoFields = new StringBuilder("infoFields,");
-                for (String h : fields) infoFields.append(",").append(h);
-                for (String h : analysisFields) infoFields.append(",").append(h);
-                for (String h : speciesListFields) infoFields.append(",").append(h);
-                for (String h : qaFields) infoFields.append(",").append(h);
-
-                StringBuilder infoHeader = new StringBuilder("infoHeaders,");
-                for (String h : header) infoHeader.append(",").append(h);
-
-                String info = infoFields.toString();
-                while (info.contains(",,")) info = info.replace(",,", ",");
-                uidStats.put(info,  new AtomicInteger(-1));
-                String hdr = infoHeader.toString();
-                while (hdr.contains(",,")) hdr = hdr.replace(",,", ",");
-                uidStats.put(hdr, new AtomicInteger(-2));
-
-                //download the records that have limits first...
-                if (downloadLimit.size() > 0) {
-                    String[] originalFq = downloadParams.getFormattedFq();
-                    StringBuilder fqBuilder = new StringBuilder("-(");
-                    for (String dr : downloadLimit.keySet()) {
-                        //add another fq to the search for data_resource_uid
-                        downloadParams.setFq((String[]) ArrayUtils.add(originalFq, "data_resource_uid:" + dr));
-                        resultsCount = downloadRecords(downloadParams, rw, downloadLimit, uidStats, fields, qaFields,
-                                resultsCount, dr, includeSensitive, dd, limit, analysisFields, speciesListFields);
-                        if (fqBuilder.length() > 2) {
-                            fqBuilder.append(" OR ");
-                        }
-                        fqBuilder.append("data_resource_uid:").append(dr);
-                    }
-                    fqBuilder.append(")");
-                    //now include the rest of the data resources
-                    //add extra fq for the remaining records
-                    downloadParams.setFq((String[]) ArrayUtils.add(originalFq, fqBuilder.toString()));
-                    resultsCount = downloadRecords(downloadParams, rw, downloadLimit, uidStats, fields, qaFields,
-                            resultsCount, null, includeSensitive, dd, limit, analysisFields, speciesListFields);
-                } else {
-                    //download all at once
-                    downloadRecords(downloadParams, rw, downloadLimit, uidStats, fields, qaFields, resultsCount,
-                            null, includeSensitive, dd, limit, analysisFields, speciesListFields);
-                }
-            } finally {
-                rw.finalise();
-            }
-        } catch (SolrServerException ex) {
-            logger.error("Problem communicating with SOLR server. " + ex.getMessage(), ex);
-        }
-
-        return uidStats;
-    }
-
-    /**
      * Expand field abbreviations
      * <p>
      * cl.p Include all contextual spatial layers
@@ -1939,7 +1709,7 @@ public class SearchDAOImpl implements SearchDAO {
             Matcher matcher = clpField.matcher(fields);
             if (matcher.find()) {
                 StringBuilder sb = new StringBuilder();
-                for (IndexFieldDTO field : getIndexedFields()) {
+                for (IndexFieldDTO field : indexDao.getIndexedFields()) {
                     if (field.getName().matches("cl[0-9]*")) {
                         if (sb.length() > 0 || matcher.start() > 0) sb.append(",");
                         sb.append(field.getName());
@@ -1952,7 +1722,7 @@ public class SearchDAOImpl implements SearchDAO {
             matcher = elpField.matcher(fields);
             if (matcher.find()) {
                 StringBuilder sb = new StringBuilder();
-                for (IndexFieldDTO field : getIndexedFields()) {
+                for (IndexFieldDTO field : indexDao.getIndexedFields()) {
                     if (field.getName().matches("el[0-9]*")) {
                         if (sb.length() > 0 || matcher.start() > 0) sb.append(",");
                         sb.append(field.getName());
@@ -1965,7 +1735,7 @@ public class SearchDAOImpl implements SearchDAO {
             matcher = allDwcField.matcher(fields);
             if (matcher.find()) {
                 StringBuilder sb = new StringBuilder();
-                for (IndexFieldDTO field : getIndexedFields()) {
+                for (IndexFieldDTO field : indexDao.getIndexedFields()) {
                     if (StringUtils.isNotEmpty(field.getDwcTerm()) &&
                             (!isSolr || field.isStored())) {
                         if (sb.length() > 0 || matcher.start() > 0) sb.append(",");
@@ -2007,198 +1777,6 @@ public class SearchDAOImpl implements SearchDAO {
             dFields = defaultDownloadFields;
         }
         return dFields;
-    }
-
-    /**
-     * Downloads the records for the supplied query. Used to break up the download into components
-     * 1) 1 call for each data resource that has a download limit (supply the data resource uid as the argument dataResource)
-     * 2) 1 call for the remaining records
-     *
-     * @param downloadParams
-     * @param downloadLimit
-     * @param uidStats
-     * @param fields
-     * @param qaFields
-     * @param resultsCount
-     * @param dataResource   The dataResource being download.  This should be null if multiple data resource are being downloaded.
-     * @return
-     * @throws Exception
-     */
-    private int downloadRecords(DownloadRequestParams downloadParams, RecordWriterError writer,
-                                Map<String, Integer> downloadLimit, ConcurrentMap<String, AtomicInteger> uidStats,
-                                String[] fields, String[] qaFields, int resultsCount, String dataResource, boolean includeSensitive,
-                                DownloadDetailsDTO dd, boolean limit, String[] analysisLayers, String[] speciesListFields) throws Exception {
-        if (logger.isInfoEnabled()) {
-            logger.info("download query: " + downloadParams.getQ());
-        }
-        SolrQuery solrQuery = initSolrQuery(downloadParams, false, null);
-        solrQuery.setRows(limit ? MAX_DOWNLOAD_SIZE : -1);
-        queryFormatUtils.formatSearchQuery(downloadParams);
-        solrQuery.setQuery(downloadParams.getFormattedQuery());
-        //Only the fields specified below will be included in the results from the SOLR Query
-        solrQuery.setFields("id", "institution_uid", "collection_uid", "data_resource_uid", "data_provider_uid", "lft", "rgt");
-
-        if (dd != null) {
-            dd.resetCounts();
-        }
-
-        //get coordinates for analysis layer intersection
-        if (analysisLayers.length > 0) {
-
-            if (!includeSensitive && dd.getSensitiveFq() != null) {
-                for (String s : sensitiveSOLRHdr) solrQuery.addField(s);
-            } else {
-                for (String s : notSensitiveSOLRHdr) solrQuery.addField(s);
-            }
-        }
-
-        int pageSize = downloadBatchSize;
-        StringBuilder sb = new StringBuilder(getDownloadFields(downloadParams));
-        if (downloadParams.getExtra().length() > 0) {
-            sb.append(",").append(downloadParams.getExtra());
-        }
-
-        List<SolrQuery> queries = new ArrayList<SolrQuery>();
-        queries.add(solrQuery);
-
-        //split into sensitive and non-sensitive queries when
-        // - not including all sensitive values
-        // - there is a sensitive fq
-        List<SolrQuery> sensitiveQ = new ArrayList<SolrQuery>();
-        if (!includeSensitive && dd.getSensitiveFq() != null) {
-            sensitiveQ = splitQueries(queries, dd.getSensitiveFq(), null, null);
-        }
-
-        final String[] sensitiveFields;
-        final String[] notSensitiveFields;
-        if (!includeSensitive && dd.getSensitiveFq() != null) {
-            //lookup for fields from sensitive queries
-            sensitiveFields = org.apache.commons.lang3.ArrayUtils.addAll(fields, sensitiveCassandraHdr);
-
-            //use general fields when sensitive data is not permitted
-            notSensitiveFields = org.apache.commons.lang3.ArrayUtils.addAll(fields, notSensitiveCassandraHdr);
-        } else {
-            sensitiveFields = new String[0];
-            notSensitiveFields = fields;
-        }
-
-        for (SolrQuery q : queries) {
-            int startIndex = 0;
-
-            String[] fq = downloadParams.getFormattedFq();
-            if (q.getFilterQueries() != null && q.getFilterQueries().length > 0) {
-                if (fq == null) {
-                    fq = new String[0];
-                }
-                fq = org.apache.commons.lang3.ArrayUtils.addAll(fq, q.getFilterQueries());
-            }
-
-            QueryResponse qr = runSolrQuery(q, fq, pageSize, startIndex, "", "");
-            List<String> uuids = new ArrayList<String>();
-
-            List<String[]> intersectionAll = intersectResults(dd.getRequestParams().getLayersServiceUrl(), analysisLayers, qr.getResults());
-
-            while (qr.getResults().size() > 0 && (!limit || resultsCount < MAX_DOWNLOAD_SIZE) &&
-                    shouldDownload(dataResource, downloadLimit, false)) {
-                if (logger.isDebugEnabled()) {
-                    logger.debug("Start index: " + startIndex);
-                }
-
-                Map<String, String[]> dataToInsert = new HashMap<String, String[]>();
-
-                //cycle through the results adding them to the list that will be sent to cassandra
-                int row = 0;
-                for (SolrDocument sd : qr.getResults()) {
-                    if (sd.getFieldValue("data_resource_uid") != null) {
-                        String druid = sd.getFieldValue("data_resource_uid").toString();
-                        if (shouldDownload(druid, downloadLimit, true) && (!limit || resultsCount < MAX_DOWNLOAD_SIZE)) {
-                            resultsCount++;
-                            String uuid = sd.getFieldValue("id").toString();
-                            uuids.add(uuid);
-
-                            //include analysis layer intersections
-                            String[] extra = null;
-                            if (intersectionAll.size() > row + 1) {
-                                extra = (String[]) ArrayUtils.subarray(intersectionAll.get(row + 1), 2, intersectionAll.get(row + 1).length);
-                                dataToInsert.put(uuid, extra);
-                            }
-
-                            // add species list fields
-                            if (sd.containsKey("lft") && sd.containsKey("rgt") && speciesListFields.length > 0) {
-                                String lftString = String.valueOf(sd.getFieldValue("lft"));
-                                String rgtString = String.valueOf(sd.getFieldValue("rgt"));
-                                if (StringUtils.isNumeric(lftString)) {
-                                    long lft = Long.parseLong(lftString);
-                                    long rgt = Long.parseLong(rgtString);
-                                    Kvp lftrgt = new Kvp(lft, rgt);
-
-                                    int extraOffset = 0;
-
-                                    // expand 'extra' array for speciesListField values
-                                    if (extra == null) {
-                                        extra = new String[speciesListFields.length];
-                                    } else {
-                                        extraOffset = extra.length;
-
-                                        String[] tmp = new String[extra.length + speciesListFields.length];
-                                        System.arraycopy(extra, 0, tmp, 0, extra.length);
-                                        extra = tmp;
-                                    }
-                                    dataToInsert.put(uuid, extra);
-
-                                    // add species list fields
-                                    if (speciesListFields.length > 0) {
-                                        String drDot = ".";
-                                        String dr = "";
-                                        int fieldIdx = 0;
-                                        for (int i = 0; i < speciesListFields.length; i++) {
-                                            if (speciesListFields[i].startsWith(drDot)) {
-                                                fieldIdx++;
-                                            } else {
-                                                dr = speciesListFields[i].split("\\.", 2)[0];
-                                                drDot = dr + ".";
-                                                fieldIdx = 0;
-                                            }
-
-                                            extra[extraOffset + i] = listsService.getKvpValue(fieldIdx, listsService.getKvp(dr), lftrgt);
-                                        }
-                                    }
-                                }
-                            }
-
-                            //increment the counters....
-                            incrementCount(uidStats, sd.getFieldValue("institution_uid"));
-                            incrementCount(uidStats, sd.getFieldValue("collection_uid"));
-                            incrementCount(uidStats, sd.getFieldValue("data_provider_uid"));
-                            incrementCount(uidStats, druid);
-                        }
-                    }
-                    row++;
-                }
-
-                String[] newMiscFields;
-                if (sensitiveQ.contains(q)) {
-                    newMiscFields = au.org.ala.biocache.Store.writeToWriter(writer, uuids.toArray(new String[]{}), sensitiveFields, qaFields, true, (dd.getRequestParams() != null ? dd.getRequestParams().getIncludeMisc() : false), dd.getMiscFields(), dataToInsert);
-                } else {
-                    newMiscFields = au.org.ala.biocache.Store.writeToWriter(writer, uuids.toArray(new String[]{}), notSensitiveFields, qaFields, includeSensitive, (dd.getRequestParams() != null ? dd.getRequestParams().getIncludeMisc() : false), dd.getMiscFields(), dataToInsert);
-                }
-
-                //test for errors
-                if (writer.hasError()) {
-                    throw RecordWriterException.newRecordWriterException(dd, downloadParams, false, writer);
-                }
-
-                dd.setMiscFields(newMiscFields);
-                startIndex += pageSize;
-                uuids.clear();
-                dd.updateCounts(qr.getResults().size());
-                if (!limit || resultsCount < MAX_DOWNLOAD_SIZE) {
-                    //we have already set the Filter query the first time the query was constructed rerun with he same params but different cursor
-                    qr = runSolrQuery(q, null, pageSize, startIndex, "", "");
-                }
-            }
-        }
-        return resultsCount;
     }
 
     /**
@@ -2405,7 +1983,7 @@ public class SearchDAOImpl implements SearchDAO {
 //        solrQuery.setFacetMinCount(1);
 //        solrQuery.setFacetLimit(MAX_DOWNLOAD_SIZE);  // unlimited = -1
 
-        QueryResponse qr = runSolrQuery(solrQuery, searchParams);
+        QueryResponse qr = indexDao.runSolrQuery(solrQuery, searchParams);
         SearchResultDTO searchResults = processSolrResponse(searchParams, qr, solrQuery, OccurrenceIndex.class);
         List<OccurrenceIndex> ocs = searchResults.getOccurrences();
 
@@ -2572,7 +2150,7 @@ public class SearchDAOImpl implements SearchDAO {
             //the user has supplied the "exact" level at which to perform the breakdown
             solrQuery.addFacetField(queryParams.getLevel());
         }
-        QueryResponse qr = runSolrQuery(solrQuery, queryParams);
+        QueryResponse qr = indexDao.runSolrQuery(solrQuery, queryParams);
         if (queryParams.getMax() != null && queryParams.getMax() > 0) {
             //need to get the return level that the number of facets are <=max ranks need to be processed in reverse order until max is satisfied
             if (qr.getResults().getNumFound() > 0) {
@@ -2681,7 +2259,7 @@ public class SearchDAOImpl implements SearchDAO {
      * @throws SolrServerException
      */
     private QueryResponse runSolrQuery(SolrQuery solrQuery, String filterQuery[], Integer pageSize,
-                                       Integer startIndex, String sortField, String sortDirection) throws SolrServerException {
+                                       Integer startIndex, String sortField, String sortDirection) throws Exception {
         SearchRequestParams requestParams = new SearchRequestParams();
         requestParams.setFq(filterQuery);
         requestParams.setFormattedFq(filterQuery);
@@ -2689,48 +2267,7 @@ public class SearchDAOImpl implements SearchDAO {
         requestParams.setStart(startIndex);
         requestParams.setSort(sortField);
         requestParams.setDir(sortDirection);
-        return runSolrQuery(solrQuery, requestParams);
-    }
-
-    /**
-     * Perform SOLR query - takes a SolrQuery and search params
-     *
-     * @param solrQuery
-     * @param requestParams
-     * @return
-     * @throws SolrServerException
-     */
-    private QueryResponse runSolrQuery(SolrQuery solrQuery, SearchRequestParams requestParams) throws SolrServerException {
-
-        if (requestParams.getFormattedFq() != null) {
-            for (String fq : requestParams.getFormattedFq()) {
-                if (StringUtils.isNotEmpty(fq)) {
-                    solrQuery.addFilterQuery(fq);
-                }
-            }
-        }
-
-        //include null facets
-        solrQuery.setFacetMissing(true);
-        solrQuery.setRows(requestParams.getPageSize());
-        solrQuery.setStart(requestParams.getStart());
-        if(StringUtils.isNotEmpty(requestParams.getDir())){
-            solrQuery.setSort(requestParams.getSort(), SolrQuery.ORDER.valueOf(requestParams.getDir()));
-        }
-
-        if (logger.isDebugEnabled()) {
-            logger.debug("Solr query: " + solrQuery.toString());
-        }
-        QueryResponse qr = query(solrQuery, queryMethod); // can throw exception
-        if (logger.isDebugEnabled()) {
-            logger.debug("qtime:" + qr.getQTime());
-            if (qr.getResults() == null) {
-                logger.debug("no results");
-            } else {
-                logger.debug("Matched records: " + qr.getResults().getNumFound());
-            }
-        }
-        return qr;
+        return indexDao.runSolrQuery(solrQuery, requestParams);
     }
 
     /**
@@ -2740,7 +2277,7 @@ public class SearchDAOImpl implements SearchDAO {
      * @return
      * @throws SolrServerException
      */
-    private QueryResponse runSolrQueryWithCursorMark(SolrQuery solrQuery, int pageSize, String cursorMark) throws SolrServerException {
+    private QueryResponse runSolrQueryWithCursorMark(SolrQuery solrQuery, Double version, int pageSize, String cursorMark) throws Exception {
 
         //include null facets
         solrQuery.setFacetMissing(true);
@@ -2758,7 +2295,7 @@ public class SearchDAOImpl implements SearchDAO {
         if (logger.isDebugEnabled()) {
             logger.debug("SOLR query (cursor mark): " + solrQuery.toString());
         }
-        QueryResponse qr = query(solrQuery, queryMethod); // can throw exception
+        QueryResponse qr = query(solrQuery, version); // can throw exception
         if (logger.isDebugEnabled()) {
             logger.debug("SOLR query (cursor mark): " + solrQuery.toString() + " qtime:" + qr.getQTime());
             if (qr.getResults() == null) {
@@ -2962,7 +2499,7 @@ public class SearchDAOImpl implements SearchDAO {
             return;
 
         try {
-            Map<String, String> formats = Config.mediaStore().getImageFormats(oi.getImage());
+            Map<String, String> formats = occurrenceUtils.getImageFormats(oi.getImage());
             oi.setImageUrl(formats.get("raw"));
             oi.setThumbnailUrl(formats.get("thumb"));
             oi.setSmallImageUrl(formats.get("small"));
@@ -2972,7 +2509,7 @@ public class SearchDAOImpl implements SearchDAO {
                 String[] imageUrls = new String[images.length];
                 for (int i = 0; i < images.length; i++) {
                     try {
-                        Map<String, String> availableFormats = Config.mediaStore().getImageFormats(images[i]);
+                        Map<String, String> availableFormats = occurrenceUtils.getImageFormats(images[i]);
                         imageUrls[i] = availableFormats.get("large");
                     } catch (Exception ex) {
                         logger.warn("Unable to update image URL for " + images[i] + ": " + ex.getMessage());
@@ -3047,7 +2584,7 @@ public class SearchDAOImpl implements SearchDAO {
                         solrQuery.add("facet.range.other", "after");
                     }
                     String field = facet.replaceAll(RANGE_SUFFIX, "");
-                    StatsIndexFieldDTO details = getRangeFieldDetails(field);
+                    StatsIndexFieldDTO details = indexDao.getRangeFieldDetails(field);
                     if (details != null) {
                         solrQuery.addNumericRangeFacet(field, details.getStart(), details.getEnd(), details.getGap());
                     }
@@ -3098,44 +2635,6 @@ public class SearchDAOImpl implements SearchDAO {
     }
 
     /**
-     * Obtains the Statistics for the supplied field so it can be used to determine the ranges.
-     *
-     * @param field
-     * @return
-     */
-    private StatsIndexFieldDTO getRangeFieldDetails(String field) {
-        StatsIndexFieldDTO details = rangeFieldCache.get(field);
-        Map<String, IndexFieldDTO> nextIndexFieldMap = indexFieldMap;
-        if (details == null && nextIndexFieldMap != null) {
-            //get the details
-            SpatialSearchRequestParams searchParams = new SpatialSearchRequestParams();
-            searchParams.setQ("*:*");
-            searchParams.setFacets(new String[]{field});
-            try {
-                Map<String, FieldStatsInfo> stats = getStatistics(searchParams);
-                if (stats != null) {
-                    IndexFieldDTO ifdto = nextIndexFieldMap.get(field);
-                    if (ifdto != null) {
-                        String type = ifdto.getDataType();
-                        details = new StatsIndexFieldDTO(stats.get(field), type);
-                        rangeFieldCache.put(field, details);
-                    } else {
-                        if (logger.isDebugEnabled()) {
-                            logger.debug("Unable to locate field:  " + field);
-                        }
-                        return null;
-                    }
-                }
-            } catch (Exception e) {
-                logger.warn("Unable to obtain range from cache.", e);
-                details = null;
-            }
-        }
-
-        return details;
-    }
-
-    /**
      * Get a distinct list of species and their counts using a facet search
      *
      * @param queryString
@@ -3146,7 +2645,7 @@ public class SearchDAOImpl implements SearchDAO {
      * @throws SolrServerException
      */
     protected List<TaxaCountDTO> getSpeciesCounts(String queryString, List<String> filterQueries, List<String> facetFields, Integer pageSize,
-                                                  Integer startIndex, String sortField, String sortDirection) throws SolrServerException {
+                                                  Integer startIndex, String sortField, String sortDirection) throws Exception {
 
         List<TaxaCountDTO> speciesCounts = new ArrayList<TaxaCountDTO>();
         SolrQuery solrQuery = new SolrQuery();
@@ -3288,26 +2787,6 @@ public class SearchDAOImpl implements SearchDAO {
     }
 
     /**
-     * Gets the details about the SOLR fields using the LukeRequestHandler:
-     * See http://wiki.apache.org/solr/LukeRequestHandler  for more information
-     */
-    public Set<IndexFieldDTO> getIndexFieldDetails(String... fields) throws Exception {
-        ModifiableSolrParams params = new ModifiableSolrParams();
-        params.set("qt", "/admin/luke");
-
-        params.set("tr", "luke.xsl");
-        if (fields != null) {
-            params.set("fl", fields);
-            params.set("numTerms", "1");
-        } else {
-            // TODO: We should be caching the result locally without calling Solr in this case, as it is called very often
-            params.set("numTerms", "0");
-        }
-        QueryResponse response = query(params, queryMethod);
-        return parseLukeResponse(response.toString(), fields != null);
-    }
-
-    /**
      * Returns the count of distinct values for the facets.
      * This is an altered implementation that is SOLRCloud friendly (ngroups are not SOLR Cloud compatible)
      *
@@ -3333,7 +2812,7 @@ public class SearchDAOImpl implements SearchDAO {
 
         facetQuery.setFilterQueries(fqList.toArray(new String[0]));
 
-        QueryResponse qr = query(facetQuery, queryMethod);
+        QueryResponse qr = query(facetQuery, searchParams.getVersion());
         SearchResultDTO searchResults = processSolrResponse(searchParams, qr, facetQuery, OccurrenceIndex.class);
 
         List<FacetResultDTO> facetResults = searchResults.getFacetResults();
@@ -3355,326 +2834,6 @@ public class SearchDAOImpl implements SearchDAO {
         return facetResults;
     }
 
-    @Override
-    public Set<IndexFieldDTO> getIndexedFields() throws Exception {
-        return getIndexedFields(false);
-    }
-
-    /**
-     * Returns details about the fields in the index.
-     */
-    @Cacheable(cacheName = "getIndexedFields")
-    public Set<IndexFieldDTO> getIndexedFields(boolean update) throws Exception {
-        Set<IndexFieldDTO> result = indexFields;
-        if (result.size() == 0 || update) {
-            synchronized (solrIndexVersionLock) {
-                result = indexFields;
-                if (result.size() == 0 || update) {
-                    result = getIndexFieldDetails(null);
-                    if (result != null && result.size() > 0) {
-                        Map<String, IndexFieldDTO> resultMap = new HashMap<String, IndexFieldDTO>();
-                        for (IndexFieldDTO field : result) {
-                            resultMap.put(field.getName(), field);
-                        }
-                        indexFields = result;
-                        indexFieldMap = resultMap;
-                    }
-                }
-            }
-        }
-        return result;
-    }
-
-    @Override
-    public Map<String, IndexFieldDTO> getIndexedFieldsMap() throws Exception {
-        // Refresh/populate the map if necessary
-        getIndexedFields();
-        return indexFieldMap;
-    }
-
-    /**
-     * parses the response string from the service that returns details about the indexed fields
-     *
-     * @param str
-     * @return
-     */
-    private Set<IndexFieldDTO> parseLukeResponse(String str, boolean includeCounts) {
-
-        //update index version
-        Pattern indexVersion = Pattern.compile("(?:version=)([0-9]{1,})");
-        try {
-            Matcher indexVersionMatcher = indexVersion.matcher(str);
-            if (indexVersionMatcher.find(0)) {
-                solrIndexVersion = Long.parseLong(indexVersionMatcher.group(1));
-                solrIndexVersionTime = System.currentTimeMillis();
-            }
-        } catch (Exception e) {}
-
-        Set<IndexFieldDTO> fieldList = includeCounts ? new java.util.LinkedHashSet<IndexFieldDTO>() : new java.util.TreeSet<IndexFieldDTO>();
-
-        Pattern typePattern = Pattern.compile("(?:type=)([a-z]{1,})");
-
-        Pattern schemaPattern = Pattern.compile("(?:schema=)([a-zA-Z\\-]{1,})");
-
-        Pattern distinctPattern = Pattern.compile("(?:distinct=)([0-9]{1,})");
-
-        String[] fieldsStr = str.split("fields=\\{");
-
-        Map<String, String> indexToJsonMap = new OccurrenceIndex().indexToJsonMap();
-
-
-        for (String fieldStr : fieldsStr) {
-            if (fieldStr != null && !"".equals(fieldStr) ) {
-                String[] fields = includeCounts ? fieldStr.split("\\}\\},") : fieldStr.split("\\},");
-
-                //sort fields for later use of indexOf
-                Arrays.sort(fields);
-
-                for (String field : fields) {
-                    formatIndexField(field, null, fieldList, typePattern, schemaPattern, indexToJsonMap, distinctPattern);
-                }
-            }
-        }
-
-        //add CASSANDRA fields that are not indexed
-        if (!downloadService.downloadSolrOnly) {
-            for (String cassandraField : Store.getStorageFieldMap().keySet()) {
-                boolean found = false;
-                //ignore fields with multiple items
-                if (cassandraField != null && !cassandraField.contains(",") ) {
-                    for (IndexFieldDTO field : fieldList) {
-                        if (field.isIndexed() || field.isStored() || field.isDocvalue()) {
-                            if (field.getDownloadName() != null && field.getDownloadName().equals(cassandraField)) {
-
-                                found = true;
-                                break;
-                            }
-                        }
-                    }
-                    if (!found) {
-                        formatIndexField(cassandraField, cassandraField, fieldList, typePattern, schemaPattern, indexToJsonMap, distinctPattern);
-                    }
-                }
-            }
-        }
-
-        //filter fields, to hide deprecated terms
-        List<String> toIgnore = new ArrayList<String>();
-        Set<IndexFieldDTO> filteredFieldList = new HashSet<IndexFieldDTO>();
-        if(indexFieldsToHide != null){
-            toIgnore = Arrays.asList(indexFieldsToHide.split(","));
-        }
-        for(IndexFieldDTO indexedField: fieldList){
-            if(!toIgnore.contains(indexedField.getName())){
-                filteredFieldList.add(indexedField);
-            }
-        }
-
-        return filteredFieldList;
-    }
-
-    private void formatIndexField(String indexField, String cassandraField, Set<IndexFieldDTO> fieldList, Pattern typePattern,
-                                  Pattern schemaPattern, Map indexToJsonMap, Pattern distinctPattern) {
-
-        if (indexField != null && !"".equals(indexField)) {
-            IndexFieldDTO f = new IndexFieldDTO();
-
-            String fieldName = indexField.split("=")[0];
-            String type = null;
-            String schema = null;
-            Matcher typeMatcher = typePattern.matcher(indexField);
-            if (typeMatcher.find(0)) {
-                type = typeMatcher.group(1);
-            }
-
-            Matcher schemaMatcher = schemaPattern.matcher(indexField);
-            if (schemaMatcher.find(0)) {
-                schema = schemaMatcher.group(1);
-            }
-
-            //don't allow the sensitive coordinates to be exposed via ws and don't allow index fields without schema
-            if (StringUtils.isNotEmpty(fieldName) && !fieldName.startsWith("sensitive_") && (cassandraField != null || schema != null)) {
-
-                f.setName(fieldName);
-                if (type != null) f.setDataType(type);
-                else f.setDataType("string");
-
-                //interpret the schema information
-                if (schema != null) {
-                    f.setIndexed(schema.contains("I"));
-                    f.setStored(schema.contains("S"));
-                    f.setMultivalue(schema.contains("M"));
-                    f.setDocvalue(schema.contains("D"));
-                }
-
-                //now add the i18n and associated strings to the field.
-                //1. description: display name from fieldName= in i18n
-                //2. info: details about this field from description.fieldName= in i18n
-                //3. dwcTerm: DwC field name for this field from dwc.fieldName= in i18n
-                //4. jsonName: json key as returned by occurrences/search
-                //5. downloadField: biocache-store column name that is usable in DownloadRequestParams.fl
-                //if the field has (5) downloadField, use it to find missing (1), (2) or (3)
-                //6. downloadDescription: the column name when downloadField is used in
-                //   DownloadRequestParams.fl and a translation occurs
-                //7. i18nValues: true | false, indicates that the values returned by this field can be
-                //   translated using facetName.value= in /facets/i18n
-                //8. class value for this field
-                if (layersPattern.matcher(fieldName).matches()) {
-                    f.setDownloadName(fieldName);
-                    String description = layersService.getLayerNameMap().get(fieldName);
-                    f.setDescription(description);
-                    f.setDownloadDescription(description);
-                    f.setInfo(layersServiceUrl + "/layers/view/more/" + fieldName);
-                    if(fieldName.startsWith("el")){
-                        f.setClasss("Environmental");
-                    } else {
-                        f.setClasss("Contextual");
-                    }
-                } else {
-                    //(5) check as a downloadField
-                    String downloadField = fieldName;
-                    if (cassandraField != null) {
-                        downloadField = cassandraField;
-                    } else if (!downloadService.downloadSolrOnly) {
-                        downloadField = Store.getIndexFieldMap().get(fieldName);
-                        //exclude compound fields
-                        if (downloadField != null && downloadField.contains(",")) downloadField = null;
-                    }
-                    if (downloadField != null) {
-                        f.setDownloadName(downloadField);
-                    }
-
-                    //(6) downloadField description
-                    String downloadFieldDescription = messageSource.getMessage(downloadField, null, "", Locale.getDefault());
-                    if (downloadFieldDescription.length() > 0) {
-                        f.setDownloadDescription(downloadFieldDescription);
-                        f.setDescription(downloadFieldDescription); //(1)
-                    }
-
-                    //(1) check as a field name
-                    String description = messageSource.getMessage("facet." + fieldName, null, "", Locale.getDefault());
-                    if (description.length() > 0 && (downloadField == null || downloadService.downloadSolrOnly)) {
-                        f.setDescription(description);
-                    } else if (downloadField != null) {
-                        description = messageSource.getMessage(downloadField, null, "", Locale.getDefault());
-                        if (description.length() > 0) {
-                            f.setDescription(description);
-                        }
-                    }
-
-                    //(2) check as a description
-                    String info = messageSource.getMessage("description." + fieldName, null, "", Locale.getDefault());
-                    if (info.length() > 0 && (downloadField == null || downloadService.downloadSolrOnly)) {
-                        f.setInfo(info);
-                    } else if (downloadField != null) {
-                        info = messageSource.getMessage("description." + downloadField, null, "", Locale.getDefault());
-                        if (info.length() > 0) {
-                            f.setInfo(info);
-                        }
-                    }
-
-                    //(3) check as a dwcTerm
-                    String camelCase = LOWER_UNDERSCORE.to(LOWER_CAMEL, fieldName);
-
-                    Term term = null;
-                    try {
-                        //find matching Darwin core term
-                        term = DwcTerm.valueOf(camelCase);
-                    } catch (IllegalArgumentException e) {
-                        //enum not found
-                    }
-                    boolean dcterm = false;
-                    try {
-                        //find matching Dublin core terms that are not in miscProperties
-                        // include case fix for rightsHolder
-                        term = DcTerm.valueOf(camelCase.replaceAll("rightsholder", "rightsHolder"));
-                        dcterm = true;
-                    } catch (IllegalArgumentException e) {
-                        //enum not found
-                    }
-                    if (term == null) {
-                        //look in message properties. This is for irregular fieldName to DwcTerm matches
-                        String dwcTerm = messageSource.getMessage("dwc." + fieldName, null, "", Locale.getDefault());
-                        if (downloadField != null) {
-                            dwcTerm = messageSource.getMessage("dwc." + downloadField, null, "", Locale.getDefault());
-                        }
-
-                        if (dwcTerm.length() > 0) {
-                            f.setDwcTerm(dwcTerm);
-
-                            try {
-                                //find the term now
-                                term = DwcTerm.valueOf(dwcTerm);
-                                if(term != null){
-                                    f.setClasss(((DwcTerm) term).getGroup()); //(8)
-                                }
-                                DwcTermDetails dwcTermDetails = DwCTerms.getInstance().getDwCTermDetails(term.simpleName());
-                                if(dwcTermDetails !=null){
-                                    if (f.getInfo() == null) f.setInfo(dwcTermDetails.comment);
-                                    if (f.getDescription() == null) f.setDescription(dwcTermDetails.label);
-                                }
-                            } catch (IllegalArgumentException e) {
-                                //enum not found
-                            }
-                        }
-                    } else {
-
-                        f.setDwcTerm(term.simpleName());
-                        if (term instanceof DwcTerm) {
-                            f.setClasss(((DwcTerm) term).getGroup()); //(8)
-                        } else {
-                            f.setClasss(DwcTerm.GROUP_RECORD); // Assign dcterms to the Record group.
-                            //apply dcterm: prefix
-                            f.setDwcTerm("dcterms:" + term.simpleName());
-                        }
-
-                        DwcTermDetails dwcTermDetails = DwCTerms.getInstance().getDwCTermDetails(term.simpleName());
-                        if(dwcTermDetails != null){
-                            if (f.getInfo() == null) f.setInfo(dwcTermDetails.comment);
-                            if (f.getDescription() == null) f.setDescription(dwcTermDetails.label);
-                        }
-                    }
-
-                    //append dwc url to info
-                    if (!dcterm && f.getDwcTerm() != null && !f.getDwcTerm().isEmpty() && StringUtils.isNotEmpty(dwcUrl)) {
-                        if (info.length() > 0) info += " ";
-                        f.setInfo(info + dwcUrl + f.getDwcTerm());
-                    }
-
-                    //(4) check as json name
-                    String json = (String) indexToJsonMap.get(fieldName);
-                    if (json != null) {
-                        f.setJsonName(json);
-                    }
-
-                    //(7) has lookupValues in i18n
-                    String i18nValues = messageSource.getMessage("i18nvalues." + fieldName, null, "", Locale.getDefault());
-                    if (i18nValues.length() > 0) {
-                        f.setI18nValues("true".equalsIgnoreCase(i18nValues));
-                    }
-
-                    //(8) get class. This will override any DwcTerm.group
-                    String classs = messageSource.getMessage("class." + fieldName, null, "", Locale.getDefault());
-                    if (downloadField != null && !downloadService.downloadSolrOnly) {
-                        classs = messageSource.getMessage("class." + downloadField, null, "", Locale.getDefault());
-                    }
-                    if (classs.length() > 0) {
-                        f.setClasss(classs);
-                    }
-                }
-
-
-                fieldList.add(f);
-            }
-
-            Matcher distinctMatcher = distinctPattern.matcher(indexField);
-            if (distinctMatcher.find(0)) {
-                Integer distinct = Integer.parseInt(distinctMatcher.group(1));
-                f.setNumberDistinctValues(distinct);
-            }
-        }
-    }
-
     /**
      * @see au.org.ala.biocache.dao.SearchDAO#findByFulltext(SpatialSearchRequestParams)
      */
@@ -3691,36 +2850,12 @@ public class SearchDAOImpl implements SearchDAO {
             solrQuery.setFacet(false);
             solrQuery.setRows(searchParams.getPageSize());
 
-            sdl = runSolrQuery(solrQuery, searchParams).getResults();
+            sdl = indexDao.runSolrQuery(solrQuery, searchParams).getResults();
         } catch (SolrServerException ex) {
             logger.error("Problem communicating with SOLR server. " + ex.getMessage(), ex);
         }
 
         return sdl;
-    }
-
-    /**
-     * @see au.org.ala.biocache.dao.SearchDAO#getStatistics(SpatialSearchRequestParams)
-     */
-    public Map<String, FieldStatsInfo> getStatistics(SpatialSearchRequestParams searchParams) throws Exception {
-        try {
-            queryFormatUtils.formatSearchQuery(searchParams);
-            String queryString = searchParams.getFormattedQuery();
-            SolrQuery solrQuery = new SolrQuery();
-            solrQuery.setQuery(queryString);
-            for (String field : searchParams.getFacets()) {
-                solrQuery.setGetFieldStatistics(field);
-            }
-            QueryResponse qr = runSolrQuery(solrQuery, searchParams);
-            if (logger.isDebugEnabled()) {
-                logger.debug(qr.getFieldStatsInfo());
-            }
-            return qr.getFieldStatsInfo();
-
-        } catch (SolrServerException ex) {
-            logger.error("Problem communicating with SOLR server. " + ex.getMessage(), ex);
-        }
-        return null;
     }
 
     public List<LegendItem> getLegend(SpatialSearchRequestParams searchParams, String facetField, String[] cutpoints) throws Exception {
@@ -3994,86 +3129,8 @@ public class SearchDAOImpl implements SearchDAO {
         this.throttle = Objects.requireNonNull(throttle, "Throttle cannot be null");
     }
 
-    private QueryResponse query(SolrParams query, SolrRequest.METHOD queryMethod) throws SolrServerException {
-        int retry = 0;
-
-        QueryResponse qr = null;
-        while (retry < maxRetries && qr == null) {
-            retry++;
-            try {
-                if (logger.isDebugEnabled()) {
-                    logger.debug("SOLR query:" + query.toString());
-                }
-
-                // this.queryMethod is not always set by init() before query() is called
-                SolrRequest.METHOD defaultMethod = solrClient instanceof EmbeddedSolrServer ? SolrRequest.METHOD.GET : SolrRequest.METHOD.POST;
-
-                qr = solrClient.query(query, queryMethod == null ? (this.queryMethod == null ? defaultMethod : this.queryMethod) : queryMethod); // can throw exception
-            } catch (SolrServerException e) {
-                //want to retry IOException and Proxy Error
-                if (retry < maxRetries && (e.getMessage().contains("IOException") || e.getMessage().contains("Proxy Error"))) {
-                    if (retryWait > 0) {
-                        try {
-                            Thread.sleep(retryWait);
-                        } catch (InterruptedException ex) {
-                            // If the Thread sleep is interrupted, we shouldn't attempt to continue
-                            Thread.currentThread().interrupt();
-                            throw e;
-                        }
-                    }
-                } else {
-                    //throw all other errors
-                    throw e;
-                }
-            } catch (SolrException e) {
-                // Fix zk disconnects, maybe
-                if (solrClient instanceof CloudSolrClient && e.getMessage().contains("Could not load collection")) {
-                    logger.error("query failed, attempting to reconnect: " + query.toString() + " : " + e.getMessage());
-
-                    // zk reconnect
-                    try {
-                        ((CloudSolrClient) solrClient).getClusterStateProvider().close();
-                    } catch (IOException io) {
-                    }
-                    ((CloudSolrClient) solrClient).getClusterStateProvider().connect();
-
-                    // solr reconnect
-                    try {
-                        solrClient.close();
-                    } catch (IOException io) {
-                    }
-                    ((CloudSolrClient) solrClient).connect();
-
-                    if (retry < maxRetries) {
-                        if (retryWait > 0) {
-                            try {
-                                Thread.sleep(retryWait);
-                            } catch (InterruptedException ex) {
-                                // If the Thread sleep is interrupted, we shouldn't attempt to continue
-                                Thread.currentThread().interrupt();
-                                throw e;
-                            }
-                        }
-                    } else {
-                        throw e;
-                    }
-                } else {
-                    logger.error("query failed: " + query.toString() + " : " + e.getMessage());
-                    throw e;
-                }
-
-            } catch (IOException ioe) {
-                //report failed query
-                logger.error("query failed: " + query.toString() + " : " + ioe.getMessage());
-                throw new SolrServerException(ioe);
-            } catch (Exception ioe) {
-                //report failed query
-                logger.error("query failed: " + query.toString() + " : " + ioe.getMessage());
-                throw new SolrServerException(ioe);
-            }
-        }
-
-        return qr;
+    private QueryResponse query(SolrParams query, Double version) throws Exception {
+        return indexDao.query(query, version);
     }
 
     /**
@@ -4094,7 +3151,7 @@ public class SearchDAOImpl implements SearchDAO {
                 String q = 1 + StringUtils.repeat(" AND 1", value - 1);
                 solrQuery.setQuery(q);
                 try {
-                    query(solrQuery, queryMethod);  //throws exception when too many boolean clauses
+                    query(solrQuery, 2.0);  //throws exception when too many boolean clauses
                     if (step == -1) value *= 2;  //push upper limit
                     else step /= 2;
                     ok = true;
@@ -4116,62 +3173,7 @@ public class SearchDAOImpl implements SearchDAO {
         return maxBooleanClauses;
     }
 
-    /**
-     * Get the SOLR index version. Trigger a background refresh on a timeout.
-     * <p>
-     * Forcing an updated value will perform a new SOLR query for each request to be run in the foreground.
-     *
-     * @param force
-     * @return
-     */
-    public Long getIndexVersion(Boolean force) {
-        Thread t = null;
-        synchronized (solrIndexVersionLock) {
-            boolean immediately = solrIndexVersionTime == 0;
 
-            if (force || solrIndexVersionTime < System.currentTimeMillis() - solrIndexVersionRefreshTime) {
-                solrIndexVersionTime = System.currentTimeMillis();
-
-                t = new Thread() {
-                    @Override
-                    public void run() {
-                        try {
-                            getIndexFieldDetails(null);
-                        } catch (Exception e) {
-                            logger.error("Failed to update solrIndexVersion", e);
-                        }
-                    }
-                };
-
-                if (immediately) {
-                    //wait with lock
-                    t.start();
-                    try {
-                        t.join();
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        logger.error("Failed to update solrIndexVersion", e);
-                    }
-                } else if (!force) {
-                    //run in background
-                    t.start();
-                }
-            }
-        }
-
-        if (force && t != null) {
-            //wait without lock
-            t.start();
-            try {
-                t.join();
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                logger.error("Failed to update solrIndexVersion", e);
-            }
-        }
-
-        return solrIndexVersion;
-    }
 
     /**
      * Perform grouped facet query.
@@ -4213,7 +3215,7 @@ public class SearchDAOImpl implements SearchDAO {
 
         solrQuery.add("json.facet", sb.toString());
 
-        return query(solrQuery, null);
+        return query(solrQuery, searchParams.getVersion());
     }
 
     /**
@@ -4315,15 +3317,19 @@ public class SearchDAOImpl implements SearchDAO {
         query.add("facet.missing", "true");
         query.setRows(0);
         searchParams.setPageSize(0);
-        QueryResponse response = runSolrQuery(query, searchParams);
+        QueryResponse response = indexDao.runSolrQuery(query, searchParams);
         NamedList<List<PivotField>> result = response.getFacetPivot();
 
         List<FacetPivotResultDTO> output = new ArrayList();
         for (Entry<String, List<PivotField>> pfl : result) {
             List<PivotField> list = pfl.getValue();
             if (list != null && list.size() > 0) {
+                // QueryResponse.getFacetPivot() is not legacy name translated by indexDao
+                String fieldName = list.get(0).getField();
+                fieldName = indexDao.getNewToLegacy().getOrDefault(fieldName, fieldName);
+
                 output.add(new FacetPivotResultDTO(
-                        list.get(0).getField(),
+                        fieldName,
                         getFacetPivotResults(list),
                         null,
                         (int) response.getResults().getNumFound())
@@ -4354,7 +3360,11 @@ public class SearchDAOImpl implements SearchDAO {
             if (pf.getPivot() == null || pf.getPivot().size() == 0) {
                 list.add(new FacetPivotResultDTO(null, null, value, pf.getCount()));
             } else {
-                list.add(new FacetPivotResultDTO(pf.getPivot().get(0).getField(), getFacetPivotResults(pf.getPivot()), value, pf.getCount()));
+                // QueryResponse.getFacetPivot() is not legacy name translated by indexDao
+                String fieldName = pf.getPivot().get(0).getField();
+                fieldName = indexDao.getNewToLegacy().getOrDefault(fieldName, fieldName);
+
+                list.add(new FacetPivotResultDTO(fieldName, getFacetPivotResults(pf.getPivot()), value, pf.getCount()));
             }
         }
 
@@ -4364,7 +3374,7 @@ public class SearchDAOImpl implements SearchDAO {
     public StringBuilder getAllQAFields() {
         //include all assertions
         StringBuilder qasb = new StringBuilder();
-        ErrorCode[] errorCodes = Store.retrieveAssertionCodes();
+        ErrorCode[] errorCodes = AssertionCodes.getAll();
         Arrays.sort(errorCodes, new Comparator<ErrorCode>() {
             @Override
             public int compare(ErrorCode o1, ErrorCode o2) {
@@ -4405,7 +3415,7 @@ public class SearchDAOImpl implements SearchDAO {
 
         query.setRows(0);
         searchParams.setPageSize(0);
-        QueryResponse response = runSolrQuery(query, searchParams);
+        QueryResponse response = indexDao.runSolrQuery(query, searchParams);
 
         List<FieldStatsItem> output = new ArrayList();
         if (facet != null && response.getFieldStatsInfo().size() > 0) {
@@ -4556,12 +3566,12 @@ public class SearchDAOImpl implements SearchDAO {
 
         ArrayList<String> found = new ArrayList<>();
 
-        for (IndexFieldDTO s : indexFields) {
+        for (IndexFieldDTO s : indexDao.getIndexedFields()) {
             // this only works for non-tri fields
             if (!s.getDataType().startsWith("t")) {
                 solrQuery.set("facet.field", "{!facet.method=enum facet.exists=true}" + s.getName());
 
-                QueryResponse qr = query(solrQuery, queryMethod); // can throw exception
+                QueryResponse qr = query(solrQuery, searchParams.getVersion()); // can throw exception
 
                 for (FacetField f : qr.getFacetFields()) {
                     if (!f.getValues().isEmpty()) {

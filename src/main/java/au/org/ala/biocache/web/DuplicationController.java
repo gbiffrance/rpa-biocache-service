@@ -13,13 +13,19 @@
  *  rights and limitations under the License.
  ***************************************************************************/
 package au.org.ala.biocache.web;
-import au.org.ala.biocache.Store;
+
+import au.org.ala.biocache.dao.IndexDAO;
 import au.org.ala.biocache.dao.SearchDAO;
+import au.org.ala.biocache.dto.DuplicateRecordDetails;
 import au.org.ala.biocache.dto.SpatialSearchRequestParams;
-import au.org.ala.biocache.model.DuplicateRecordDetails;
+import au.org.ala.biocache.util.OccurrenceUtils;
+import au.org.ala.biocache.util.QueryFormatUtils;
 import au.org.ala.biocache.util.SearchUtils;
+import org.apache.commons.lang.StringUtils;
 import org.apache.log4j.Logger;
 import org.apache.solr.client.solrj.response.FieldStatsInfo;
+import org.apache.solr.common.SolrDocument;
+import org.apache.solr.common.SolrDocumentList;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
@@ -27,7 +33,9 @@ import org.springframework.web.bind.annotation.ResponseBody;
 
 import javax.inject.Inject;
 import javax.servlet.http.HttpServletRequest;
-import java.util.Map;
+import java.util.*;
+
+import static au.org.ala.biocache.dto.DuplicateRecordDetails.*;
 
 @Controller
 public class DuplicationController {
@@ -37,6 +45,8 @@ public class DuplicationController {
     /** Fulltext search DAO */
     @Inject
     protected SearchDAO searchDAO;
+    @Inject
+    protected IndexDAO indexDao;
     @Inject
     protected SearchUtils searchUtils;
 
@@ -49,14 +59,36 @@ public class DuplicationController {
      * @throws Exception
      */
     @RequestMapping(value = {"/duplicates/**"}, method = RequestMethod.GET)
-    public @ResponseBody DuplicateRecordDetails getDuplicateStats(HttpServletRequest request) throws Exception {
+    public @ResponseBody
+    DuplicateRecordDetails getDuplicateStats(HttpServletRequest request) throws Exception {
         String guid = searchUtils.getGuidFromPath(request);
         try {
-            return Store.getDuplicateDetails(guid);
+            SolrDocument sd = searchDuplicates(ID, guid).get(0);
+
+            DuplicateRecordDetails drd = new DuplicateRecordDetails(sd);
+
+            if ("U".equals(drd.getStatus())) {                // is original
+                List<DuplicateRecordDetails> dups = new ArrayList<>();
+                SolrDocumentList list = searchDuplicates(DUPLICATE_OF, guid);
+                for (int i=0;i<list.size();i++) {
+                    SolrDocument d = list.get(i);
+                    dups.add(new DuplicateRecordDetails(d));
+                }
+            }
+
+            return drd;
         } catch (Exception e) {
             logger.error("Unable to get duplicate details for " + guid, e);
             return new DuplicateRecordDetails();
         }
+    }
+
+    private SolrDocumentList searchDuplicates(String field, String value) throws Exception {
+        SpatialSearchRequestParams query = new SpatialSearchRequestParams();
+        query.setFacet(false);
+        query.setQ(field + ":" + value);
+        query.setFl(StringUtils.join(new String[] {ID, DUPLICATE_OF, DUPLICATE_REASONS, DUPLICATE_STATUS}));
+        return searchDAO.findByFulltext(query);
     }
 
     @RequestMapping(value = {"/stats/**"}, method = RequestMethod.GET)
@@ -65,6 +97,6 @@ public class DuplicationController {
         SpatialSearchRequestParams searchParams = new SpatialSearchRequestParams();
         searchParams.setQ("*:*");
         searchParams.setFacets(new String[]{guid});
-        return searchDAO.getStatistics(searchParams);
+        return indexDao.getStatistics(searchParams);
     }
 }

@@ -18,7 +18,7 @@ import au.org.ala.biocache.dao.QidCacheDAO;
 import au.org.ala.biocache.dao.SearchDAO;
 import au.org.ala.biocache.dao.TaxonDAO;
 import au.org.ala.biocache.dto.*;
-import au.org.ala.biocache.model.Qid;
+import au.org.ala.biocache.dto.Qid;
 import au.org.ala.biocache.util.*;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;

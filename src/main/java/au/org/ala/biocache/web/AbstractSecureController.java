@@ -14,7 +14,7 @@
  ***************************************************************************/
 package au.org.ala.biocache.web;
 
-import au.org.ala.biocache.Store;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.commons.lang3.StringUtils;
 import org.eclipse.jetty.util.ConcurrentHashSet;
@@ -127,7 +127,7 @@ public class AbstractSecureController {
      * @throws Exception
      */
     public boolean shouldPerformOperation(String apiKey,HttpServletResponse response, boolean checkReadOnly) throws Exception {
-        if(checkReadOnly && Store.isReadOnly()){
+        if(checkReadOnly){
             response.sendError(HttpServletResponse.SC_CONFLICT, "Server is in read only mode.  Try again later.");
             return false;
         } else if(!isValidKey(apiKey)){

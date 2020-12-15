@@ -1,8 +1,8 @@
 package au.org.ala.biocache.service;
 
-import au.org.ala.biocache.Config;
 import au.org.ala.biocache.dto.SpeciesCountDTO;
 import au.org.ala.biocache.dto.SpeciesImageDTO;
+import au.org.ala.biocache.util.OccurrenceUtils;
 import au.org.ala.names.model.LinnaeanRankClassification;
 import au.org.ala.names.model.NameSearchResult;
 import au.org.ala.names.search.*;
@@ -32,6 +32,9 @@ public class SpeciesLookupIndexService implements SpeciesLookupService {
 
     @Inject
     protected ImageMetadataService imageMetadataService;
+
+    @Inject
+    protected OccurrenceUtils occurrenceUtils;
 
     @Inject
     protected ListsService listsService;
@@ -415,7 +418,7 @@ public class SpeciesLookupIndexService implements SpeciesLookupService {
 
         if (speciesImage != null && speciesImage.getImage() != null) {
             try {
-                Map im = Config.mediaStore().getImageFormats(speciesImage.getImage());
+                Map im = occurrenceUtils.getImageFormats(speciesImage.getImage());
                 formatted.put("imageSource", speciesImage.getDataResourceUid());
                 //number of occurrences with images
                 formatted.put("imageCount", speciesImage.getCount());

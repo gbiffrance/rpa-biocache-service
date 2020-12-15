@@ -1,6 +1,5 @@
 package au.org.ala.biocache.util;
 
-import au.org.ala.biocache.Config;
 import au.org.ala.biocache.dto.OccurrenceSourceDTO;
 import au.org.ala.biocache.dto.SearchRequestParams;
 import au.org.ala.biocache.dto.SpatialSearchRequestParams;
@@ -260,7 +259,7 @@ public class SearchUtils {
             RankType rankType = RankType.getForName(rank.toLowerCase());
             if(rankType != null){
                 try {
-                    NameSearchResult r = Config.nameIndex().searchForRecord(scientificName, rankType);
+                    NameSearchResult r = null;//TODO: Config.nameIndex().searchForRecord(scientificName, rankType);
                     if(r != null){
                         return "lft:[" + r.getLeft() + " TO " + r.getRight() + "]";
                     }

@@ -5,13 +5,14 @@ import au.org.ala.biocache.dao.SearchDAOImpl;
 import au.org.ala.biocache.dto.Facet;
 import au.org.ala.biocache.dto.SearchRequestParams;
 import au.org.ala.biocache.dto.SpatialSearchRequestParams;
-import au.org.ala.biocache.model.Qid;
+import au.org.ala.biocache.dto.Qid;
 import au.org.ala.biocache.service.AuthService;
 import au.org.ala.biocache.service.LayersService;
 import au.org.ala.biocache.service.ListsService;
 import au.org.ala.biocache.service.ListsService.SpeciesListSearchDTO;
 import au.org.ala.biocache.service.SpeciesLookupService;
 import com.google.common.collect.Iterables;
+import com.google.common.html.HtmlEscapers;
 import org.apache.commons.lang.ArrayUtils;
 import org.apache.commons.lang.StringUtils;
 import org.apache.log4j.Logger;
@@ -28,7 +29,6 @@ import java.util.regex.MatchResult;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import static com.google.common.html.HtmlEscapers.htmlEscaper;
 import static java.util.stream.Collectors.joining;
 import static java.util.stream.Collectors.toList;
 import static java.util.stream.StreamSupport.stream;
@@ -469,15 +469,15 @@ public class QueryFormatUtils {
             String speciesList = m.group(2);
             String prefix = m.group(1);
             if (failedLists.contains(speciesList)) {
-                m.appendReplacement(sb,prefix + "<span class=\"species_list failed\" id='" + htmlEscaper().escape(speciesList) + "'>" + htmlEscaper().escape(speciesList) + " (FAILED)</span>");
+                m.appendReplacement(sb,prefix + "<span class=\"species_list failed\" id='" + HtmlEscapers.htmlEscaper().escape(speciesList) + "'>" + HtmlEscapers.htmlEscaper().escape(speciesList) + " (FAILED)</span>");
             } else {
                 try {
                     SpeciesListSearchDTO.SpeciesListDTO dto = listsService.getListInfo(speciesList);
                     String name = dto.listName;
-                    m.appendReplacement(sb, prefix + "<span class='species_list' id='" + htmlEscaper().escape(speciesList) + "'>" + htmlEscaper().escape(name) + "</span>");
+                    m.appendReplacement(sb, prefix + "<span class='species_list' id='" + HtmlEscapers.htmlEscaper().escape(speciesList) + "'>" + HtmlEscapers.htmlEscaper().escape(name) + "</span>");
                 } catch (Exception e) {
                     logger.error("Couldn't get species list name for " + speciesList, e);
-                    m.appendReplacement(sb, prefix + "<span class='species_list' id='" + htmlEscaper().escape(speciesList) + "'>Species list</span>");
+                    m.appendReplacement(sb, prefix + "<span class='species_list' id='" + HtmlEscapers.htmlEscaper().escape(speciesList) + "'>Species list</span>");
                 }
             }
         }

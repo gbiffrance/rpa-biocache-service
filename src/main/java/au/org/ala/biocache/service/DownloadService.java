@@ -16,6 +16,7 @@ package au.org.ala.biocache.service;
 
 import au.com.bytecode.opencsv.CSVReader;
 import au.com.bytecode.opencsv.CSVWriter;
+import au.org.ala.biocache.dao.IndexDAO;
 import au.org.ala.biocache.dao.PersistentQueueDAO;
 import au.org.ala.biocache.dao.SearchDAO;
 import au.org.ala.biocache.dto.DownloadDetailsDTO;
@@ -43,7 +44,6 @@ import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
 import org.json.simple.parser.JSONParser;
 import org.json.simple.parser.ParseException;
-import org.scale7.cassandra.pelops.exceptions.PelopsException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationListener;
 import org.springframework.context.event.ContextClosedEvent;
@@ -95,6 +95,8 @@ public class DownloadService implements ApplicationListener<ContextClosedEvent> 
     @Inject
     protected SearchDAO searchDAO;
     @Inject
+    protected IndexDAO indexDao;
+    @Inject
     protected RestOperations restTemplate;
     @Inject
     protected com.fasterxml.jackson.databind.ObjectMapper objectMapper;
@@ -108,10 +110,6 @@ public class DownloadService implements ApplicationListener<ContextClosedEvent> 
 
     @Inject
     protected AuthService authService;
-
-    // when everything is indexed in SOLR, there will be no cassandra download unless requested
-    @Value("${download.solr.only:false}")
-    public Boolean downloadSolrOnly = Boolean.FALSE;
 
     // default value is supplied for the property below
     @Value("${webservices.root:http://localhost:8080/biocache-service}")
@@ -325,10 +323,7 @@ public class DownloadService implements ApplicationListener<ContextClosedEvent> 
                                 Long pollDelayMs = jo.containsKey("pollDelay") ? (Long) jo.get("pollDelay") : null;
                                 Long executionDelayMs = jo.containsKey("executionDelay") ? (Long) jo.get("executionDelay") : null;
                                 Integer threadPriority = jo.containsKey("threadPriority") ? ((Long) jo.get("threadPriority")).intValue() : Thread.NORM_PRIORITY;
-                                DownloadType dt = null;
-                                if (type != null) {
-                                    dt = "index".equals(type) ? DownloadType.RECORDS_INDEX : DownloadType.RECORDS_DB;
-                                }
+                                DownloadType dt = DownloadType.RECORDS_INDEX;
 
                                 String nextThreadName = "biocache-download-control-";
                                 nextThreadName += label;
@@ -573,11 +568,7 @@ public class DownloadService implements ApplicationListener<ContextClosedEvent> 
             }
             
             final ConcurrentMap<String, AtomicInteger> uidStats;
-            if (fromIndex) {
-                uidStats = searchDAO.writeResultsFromIndexToStream(requestParams, sp, includeSensitive, dd, limit, parallelExecutor);
-            } else {
-                uidStats = searchDAO.writeResultsToStream(requestParams, sp, 100, includeSensitive, dd, limit);
-            }
+            uidStats = searchDAO.writeResultsFromIndexToStream(requestParams, sp, includeSensitive, dd, limit, parallelExecutor);
 
             sp.closeEntry();
 
@@ -710,7 +701,7 @@ public class DownloadService implements ApplicationListener<ContextClosedEvent> 
 
                 String readmeTemplate = "";
                 if (new File(readmeFile).exists()) {
-                    readmeTemplate = Files.asCharSource(new File(readmeFile), StandardCharsets.UTF_8).read();
+                    readmeTemplate = FileUtils.readFileToString(new File(readmeFile), StandardCharsets.UTF_8);
                 }
 
                 String readmeContent = readmeTemplate.replace("[url]", fileLocation)
@@ -807,7 +798,7 @@ public class DownloadService implements ApplicationListener<ContextClosedEvent> 
             response.setContentType("text/plain");
         }
 
-        DownloadDetailsDTO.DownloadType type = fromIndex ? DownloadType.RECORDS_INDEX : DownloadType.RECORDS_DB;
+        DownloadDetailsDTO.DownloadType type = DownloadType.RECORDS_INDEX;
         DownloadDetailsDTO dd = registerDownload(requestParams, ip, type);
         writeQueryToStream(dd, requestParams, ip, new CloseShieldOutputStream(out), includeSensitive, fromIndex, true, zip, parallelQueryExecutor, null);
     }
@@ -935,7 +926,7 @@ public class DownloadService implements ApplicationListener<ContextClosedEvent> 
                 // Object[] citations =
                 // restfulClient.restPost(citationServiceUrl, "text/json",
                 // uidStats.keySet());
-                Set<IndexFieldDTO> indexedFields = searchDAO.getIndexedFields();
+                Set<IndexFieldDTO> indexedFields = indexDao.getIndexedFields();
 
                 // header
                 writer.writeNext(new String[] { "Column name", "Requested field", "DwC Name", "Field name",
@@ -1300,7 +1291,7 @@ public class DownloadService implements ApplicationListener<ContextClosedEvent> 
                                     downloadFileLocation = archiveFileLocation;
                                 }
 
-                                emailBody = Files.asCharSource(new File(emailTemplate), StandardCharsets.UTF_8).read();
+                                emailBody = FileUtils.readFileToString(new File(emailTemplate), StandardCharsets.UTF_8);
 
                                 final String searchUrl = generateSearchUrl(currentDownload.getRequestParams());
                                 String emailBodyHtml = emailBody.replace("[url]", downloadFileLocation)
@@ -1334,16 +1325,6 @@ public class DownloadService implements ApplicationListener<ContextClosedEvent> 
                             throw e;
                         } catch (CancellationException e) {
                             //download cancelled, do not send an email
-                        } catch (com.datastax.driver.core.exceptions.DriverException e) {
-                            logger.warn("Offline download failed. Cassandra driver error. Retrying in 5 mins. Task file: " + currentDownload.getFileLocation() + " : " + e.getMessage(), e);
-                            //return to queue in 5mins as long as the VM is not restarted during that time, in which case it could be permanently stuck in a broken state
-                            doRetry = true;
-                            newRetryThread(currentDownload).start();
-                        } catch (PelopsException e) {
-                            logger.warn("Offline download failed. Cassandra error. Retrying in 5 mins. Task file: " + currentDownload.getFileLocation() + " : " + e.getMessage(), e);
-                            //return to queue in 5mins as long as the VM is not restarted during that time, in which case it could be permanently stuck in a broken state
-                            doRetry = true;
-                            newRetryThread(currentDownload).start();
                         } catch (Exception e) {
                             logger.error("Error in offline download, sending email. download path: "
                                     + currentDownload.getFileLocation(), e);

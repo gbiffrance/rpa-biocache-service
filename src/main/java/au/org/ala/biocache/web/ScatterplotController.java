@@ -1,5 +1,6 @@
 package au.org.ala.biocache.web;
 
+import au.org.ala.biocache.dao.IndexDAO;
 import au.org.ala.biocache.dao.SearchDAO;
 import au.org.ala.biocache.dto.IndexFieldDTO;
 import au.org.ala.biocache.dto.SpatialSearchRequestParams;
@@ -58,6 +59,8 @@ public class ScatterplotController {
 
     @Inject
     protected SearchDAO searchDAO;
+    @Inject
+    protected IndexDAO indexDao;
 
     @RequestMapping(value = {"/scatterplot"}, method = RequestMethod.GET)
     public void scatterplot(SpatialSearchRequestParams requestParams,
@@ -144,7 +147,7 @@ public class ScatterplotController {
         String displayNameX = null;
         String displayNameY = null;
         List<String> validDatatypes = Arrays.asList(VALID_DATATYPES);
-        Set<IndexFieldDTO> indexedFields = searchDAO.getIndexedFields();
+        Set<IndexFieldDTO> indexedFields = indexDao.getIndexedFields();
         
         Exception toThrowX = null;
         

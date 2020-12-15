@@ -277,7 +277,6 @@ public class DownloadDetailsDTO {
      */ 
     public enum DownloadType{
         FACET,
-        RECORDS_DB,
         RECORDS_INDEX
     }
 

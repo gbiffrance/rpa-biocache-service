@@ -14,18 +14,22 @@
  ***************************************************************************/
 package au.org.ala.biocache.util;
 
-import au.org.ala.biocache.Store;
+
+import au.org.ala.biocache.dao.StoreDAO;
 import au.org.ala.biocache.dto.ContactDTO;
-import au.org.ala.biocache.dto.OccurrenceDTO;
-import au.org.ala.biocache.model.FullRecord;
-import au.org.ala.biocache.model.QualityAssertion;
-import au.org.ala.biocache.model.ValidationRule;
+import au.org.ala.biocache.dto.QualityAssertion;
+import au.org.ala.biocache.dto.UserAssertions;
 import au.org.ala.biocache.service.AuthService;
+import org.apache.solr.common.SolrDocument;
+import org.apache.solr.common.SolrDocumentList;
 import org.springframework.stereotype.Component;
 
 import javax.inject.Inject;
+import java.io.IOException;
 import java.util.List;
 import java.util.Map;
+
+import static au.org.ala.biocache.dto.OccurrenceIndex.*;
 
 @Component("assertionUtils")
 public class AssertionUtils {
@@ -36,6 +40,8 @@ public class AssertionUtils {
     protected ContactUtils contactUtils;
     @Inject
     protected OccurrenceUtils occurrenceUtils;
+    @Inject
+    protected StoreDAO storeDao;
 
     /**
      * Retrieve the user assertions adding additional metadata about users
@@ -44,42 +50,9 @@ public class AssertionUtils {
      * @param recordUuid
      * @return quality assertions
      */
-    public List<QualityAssertion> getUserAssertions(String recordUuid) throws Exception {
-        FullRecord[] fr = occurrenceUtils.getAllVersionsByUuid(recordUuid, false);
-        OccurrenceDTO occ = new OccurrenceDTO(fr);
-        return getUserAssertions(occ);
-    }
-
-    public ValidationRule[] getQueryAssertions(String recordUuid) throws Exception {
-        FullRecord[] fr = occurrenceUtils.getAllVersionsByUuid(recordUuid, false);
-
-        if(fr == null) {
-            return null;
-        } else {
-            final OccurrenceDTO occ = new OccurrenceDTO(fr);
-            final FullRecord processed = occ.getProcessed();
-            if(processed == null) {
-                return new ValidationRule[0];
-            } else {
-                Map<String,String> queryAssertionMap = processed.getQueryAssertions();
-
-
-                ValidationRule[] aqs = Store.getValidationRules(queryAssertionMap.keySet().toArray(new String[0]));
-                //Legacy integration - fix up the user assertions - legacy - to add replace with CAS IDs....
-                for(ValidationRule ua : aqs){
-                    if(ua.getUserId() == null && ua.getUserName().contains("@")){
-                        String email = ua.getUserName();
-                        String userId = authService.getMapOfEmailToId().get(ua.getUserName());
-                        ua.setUserEmail(email);
-                        ua.setUserId(userId);
-                    }
-
-                    String userName = authService.getMapOfAllUserNamesByNumericId().get(ua.getUserId());
-                    ua.setUserName(userName);
-                }
-                return aqs;
-            }
-        }
+    public UserAssertions getUserAssertions(String recordUuid) throws Exception {
+        SolrDocument sd = occurrenceUtils.getOcc(recordUuid);
+        return getUserAssertions(sd);
     }
 
     /**
@@ -89,56 +62,42 @@ public class AssertionUtils {
      * @param occ
      * @return quality assertions
      */
-    public List<QualityAssertion> getUserAssertions(OccurrenceDTO occ) {
-        if (occ.getRaw() != null){
+    public UserAssertions getUserAssertions(SolrDocument sd) throws IOException {
+        if (sd.containsKey(ROW_KEY)){
             //set the user assertions
-            List<QualityAssertion> userAssertions = Store.getUserAssertions(occ.getRaw().getRowKey());
+            UserAssertions userAssertions = storeDao.get(UserAssertions.class, (String) sd.getFieldValue(ROW_KEY));
             //Legacy integration - fix up the user assertions - legacy - to add replace with CAS IDs....
-            for(QualityAssertion ua : userAssertions){
+            for(QualityAssertion ua : userAssertions.getUserAssertions()){
                 if(ua.getUserId().contains("@")){
                     String email = ua.getUserId();
                     String userId = authService.getMapOfEmailToId().get(email);
                     ua.setUserEmail(email);
                     ua.setUserId(userId);
                 }
+
+                //add user roles....
+                enhanceQA(sd, ua);
             }
-    
-            //add user roles....
-            for(QualityAssertion ua : userAssertions){
-                enhanceQA(occ, ua);
-            }
+
             return userAssertions;
         } else {
             return null;
         }
     }
 
-    public QualityAssertion enhanceQA(OccurrenceDTO occ, QualityAssertion ua) {
+    public QualityAssertion enhanceQA(SolrDocument sd, QualityAssertion ua) {
         String email = ua.getUserEmail();
-        ContactDTO contact = contactUtils.getContactForEmailAndUid(email, occ.getProcessed().getAttribution().getCollectionUid());
-        if (contact != null){
+        ContactDTO contact = contactUtils.getContactForEmailAndUid(email, (String) sd.getFieldValue(COLLECTION_UID));
+        if(contact != null){
             ua.setUserRole(contact.getRole());
-            ua.setUserEntityName(occ.getProcessed().getAttribution().getCollectionName());
-            ua.setUserEntityUid(occ.getProcessed().getAttribution().getCollectionUid());
+            ua.setUserEntityName((String) sd.getFieldValue(COLLECTION_NAME));
+            ua.setUserEntityUid((String) sd.getFieldValue(COLLECTION_UID));
         }
         return ua;
     }
 
     public QualityAssertion enhanceQA(String recordUuid, QualityAssertion ua) throws Exception {
-        FullRecord[] fr = occurrenceUtils.getAllVersionsByUuid(recordUuid, false);
-        OccurrenceDTO occ = new OccurrenceDTO(fr);
-        String email = ua.getUserEmail();
-        ContactDTO contact = contactUtils.getContactForEmailAndUid(email, occ.getProcessed().getAttribution().getCollectionUid());
-        if(contact != null){
-            ua.setUserRole(contact.getRole());
-            ua.setUserEntityName(occ.getProcessed().getAttribution().getCollectionName());
-            ua.setUserEntityUid(occ.getProcessed().getAttribution().getCollectionUid());
-        }
-        return ua;
-    }
-
-    public QualityAssertion getUserAssertion(String recordUuid, String assertionUuid) throws Exception {
-        QualityAssertion qa = Store.getUserAssertion(recordUuid,assertionUuid);
-        return enhanceQA(recordUuid, qa);
+        SolrDocument sd = occurrenceUtils.getOcc(recordUuid);
+        return enhanceQA(sd, ua);
     }
 }

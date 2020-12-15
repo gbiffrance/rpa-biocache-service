@@ -14,23 +14,34 @@
  ***************************************************************************/
 package au.org.ala.biocache.web;
 
-import au.org.ala.biocache.Store;
+
 import au.org.ala.biocache.dao.QidCacheDAO;
 import au.org.ala.biocache.dao.SearchDAO;
 import au.org.ala.biocache.dao.SearchDAOImpl;
 import au.org.ala.biocache.dto.*;
-import au.org.ala.biocache.model.Qid;
+import au.org.ala.biocache.dto.Qid;
+import com.ctc.wstx.util.URLUtil;
+import net.sf.json.JSONArray;
+import net.sf.json.JSONObject;
+import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang.ArrayUtils;
 import org.apache.commons.lang.StringUtils;
 import org.apache.log4j.Logger;
+import org.opengis.metadata.identification.CharacterSet;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
+import org.springframework.util.StreamUtils;
 import org.springframework.web.bind.annotation.*;
+import retrofit2.http.Url;
 
 import javax.inject.Inject;
 import javax.servlet.ServletOutputStream;
 import javax.servlet.http.HttpServletResponse;
+import java.io.File;
 import java.io.OutputStream;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 /**
@@ -49,11 +60,46 @@ public class ExploreController {
     @Inject
     protected SearchDAO searchDao;
     /** Name of view for site home page */
-    private final String DEFAULT_LOCATION = "Clunies Ross St, Black Mountain, ACT";
     private final String POINTS_GEOJSON = "json/pointsGeoJson";
 
     @Inject
     protected QidCacheDAO qidCacheDao;
+
+    @Value("${species.subgroups.url:}")
+    protected String speciesSubgroupsUrl;
+    private String speciesSubgroups = null;
+    public String getSubgroupsConfig() {
+        if (speciesSubgroups == null) {
+            speciesSubgroups = getStringFromPath(speciesSubgroupsUrl);
+        }
+
+        return speciesSubgroups;
+    }
+
+    @Value("${species.groups.url:}")
+    protected String speciesGroupsUrl;
+    private String speciesGroups = null;
+    public String getGroupsConfig() {
+        if (speciesGroups == null) {
+            speciesGroups = getStringFromPath(speciesGroupsUrl);
+        }
+
+        return speciesGroups;
+    }
+
+    private String getStringFromPath(String path) {
+        String result = null;
+        try {
+            if (path.startsWith("http")) {
+                result = StreamUtils.copyToString(URLUtil.inputStreamFromURL(new URL(path)), CharacterSet.UTF_8.toCharset());
+            } else {
+                result = FileUtils.readFileToString(new File(path), "UTF-8");
+            }
+        } catch (Exception e) {
+            logger.error("Exception reading from species.subgroups.url: " + speciesSubgroups, e);
+        }
+        return result;
+    }
 
     /** Mapping of radius in km to OpenLayers zoom level */
     public final static HashMap<Float, Integer> radiusToZoomLevelMap = new HashMap<Float, Integer>();
@@ -69,7 +115,7 @@ public class ExploreController {
         response.setContentType("application/json");
         try {
             OutputStream out = response.getOutputStream();
-            out.write(Store.retrieveSubgroupsConfig().getBytes("UTF-8"));
+            out.write(getSubgroupsConfig().getBytes(StandardCharsets.UTF_8));
             out.flush();
             out.close();
         } catch (Exception e) {
@@ -90,16 +136,21 @@ public class ExploreController {
     public @ResponseBody Collection<SpeciesGroupDTO> yourHierarchicalAreaView(
             SpatialSearchRequestParams requestParams, String speciesGroup) throws Exception {
 
-        List<au.org.ala.biocache.vocab.SpeciesGroup> ssgs = au.org.ala.biocache.Store.retrieveSpeciesSubgroups();
+        JSONArray ssgs = JSONArray.fromObject(getSubgroupsConfig());
         Map<String, SpeciesGroupDTO> parentGroupMap = new LinkedHashMap<String, SpeciesGroupDTO>();
 
         //create a parent lookup table
         Map<String, String> parentLookup = new HashMap<String, String>();
-        for(au.org.ala.biocache.vocab.SpeciesGroup sg : ssgs){
-            if(sg.parent() != null && sg.parent() != ""){
-                parentLookup.put(sg.name().toLowerCase(), sg.parent());
-                if(parentGroupMap.get(sg.parent()) == null){
-                    parentGroupMap.put(sg.parent(), new SpeciesGroupDTO(sg.parent(), 0, 0, 1));
+        for(Object sg : ssgs){
+            if (sg instanceof JSONObject
+                    && ((JSONObject) sg).containsKey("parent")
+                    && ((JSONObject) sg).containsKey("name")) {
+                String parent = ((JSONObject) sg).getString("parent");
+                if (StringUtils.isNotEmpty(parent)) {
+                    parentLookup.put(((JSONObject) sg).getString("name").toLowerCase(), parent);
+                    if(parentGroupMap.get(parent) == null){
+                        parentGroupMap.put(parent, new SpeciesGroupDTO(parent, 0, 0, 1));
+                    }
                 }
             }
         }
@@ -175,7 +226,7 @@ public class ExploreController {
 	public @ResponseBody List<SpeciesGroupDTO> yourAreaView(SpatialSearchRequestParams requestParams) throws Exception {
 
         //now we want to grab all the facets to get the counts associated with the species groups
-        List<au.org.ala.biocache.vocab.SpeciesGroup> sgs = au.org.ala.biocache.Store.retrieveSpeciesGroups();
+        JSONArray sgs = JSONArray.fromObject(getGroupsConfig());
         List<SpeciesGroupDTO> speciesGroups = new java.util.ArrayList<SpeciesGroupDTO>();
         SpeciesGroupDTO all = new SpeciesGroupDTO();
         String originalQ = requestParams.getQ();
@@ -189,30 +240,37 @@ public class ExploreController {
         String oldName = null;
         String kingdom = null;
         //set the counts an indent levels for all the species groups
-        for(au.org.ala.biocache.vocab.SpeciesGroup sg : sgs){
-            logger.debug("name: " + sg.name() + " parent: " +sg.parent());
-            int level =3;
-            SpeciesGroupDTO sdto = new SpeciesGroupDTO();
-            sdto.setName(sg.name());
+        for(Object sg : sgs){
+            if( sg instanceof JSONObject
+                    && ((JSONObject) sg).containsKey("parent")
+                    && ((JSONObject) sg).containsKey("name")) {
+                String parent = ((JSONObject) sg).getString("parent");
+                String name = ((JSONObject) sg).getString("name");
 
-            if(oldName!= null && sg.parent()!= null && sg.parent().equals(kingdom)) {
-                level = 2;
-            }
+                logger.debug("name: " + name + " parent: " + parent);
+                int level =3;
+                SpeciesGroupDTO sdto = new SpeciesGroupDTO();
+                sdto.setName(name);
 
-            oldName = sg.name();
-            if(sg.parent() == null){
-                level = 1;
-                kingdom = sg.name();
+                if(oldName!= null && parent!= null && parent.equals(kingdom)) {
+                    level = 2;
+                }
+
+                oldName = name;
+                if(parent == null){
+                    level = 1;
+                    kingdom = name;
+                }
+                sdto.setLevel(level);
+                //set the original query back to default to clean up after ourselves
+                requestParams.setQ(originalQ);
+                //query per group
+                counts = getYourAreaCount(requestParams, name);
+                sdto.setCount(counts[0]);
+                sdto.setSpeciesCount(counts[1]);
+                speciesGroups.add(sdto);
             }
-            sdto.setLevel(level);
-            //set the original query back to default to clean up after ourselves
-            requestParams.setQ(originalQ);
-            //query per group
-            counts = getYourAreaCount(requestParams, sg.name());
-            sdto.setCount(counts[0]);
-            sdto.setSpeciesCount(counts[1]);
-            speciesGroups.add(sdto);
-        }
+            }
         return speciesGroups;
 	}
 

@@ -32,13 +32,12 @@ import java.util.List;
 public class TaxonDAOImpl implements TaxonDAO {
 
     private static final Logger logger = Logger.getLogger(TaxonDAOImpl.class);
-    protected SolrClient server;
 
     /**
      * SOLR client instance
      */
     @Inject
-    private SolrClient solrClient;
+    private IndexDAO indexDAO;
 
     public void extractBySpeciesGroups(String metadataUrl, String q, String[] fq, Writer writer) throws Exception{
 
@@ -172,7 +171,7 @@ public class TaxonDAOImpl implements TaxonDAO {
         if(filterQueries != null){
             for(String fq: filterQueries) query.addFilterQuery(fq);
         }
-        QueryResponse response = solrClient.query(query);
+        QueryResponse response = indexDAO.query(query);
         List<FacetField.Count> fc = response.getFacetField(facetName).getValues();
         if(fc == null){
             fc = new ArrayList<FacetField.Count>();

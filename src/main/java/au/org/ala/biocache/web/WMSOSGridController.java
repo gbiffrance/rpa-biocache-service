@@ -1,5 +1,6 @@
 package au.org.ala.biocache.web;
 
+import au.org.ala.biocache.dao.IndexDAO;
 import au.org.ala.biocache.dao.SearchDAO;
 import au.org.ala.biocache.dto.*;
 import au.org.ala.biocache.util.*;
@@ -17,7 +18,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
-import scala.Option;
 
 import javax.imageio.ImageIO;
 import javax.inject.Inject;
@@ -40,6 +40,8 @@ public class WMSOSGridController {
 
     @Inject
     protected SearchDAO searchDAO;
+    @Inject
+    protected IndexDAO indexDao;
 
     @Inject
     protected WMSUtils wmsUtils;
@@ -59,21 +61,21 @@ public class WMSOSGridController {
 
         String cleanedRef = gridReference.replaceAll("[^a-zA-Z0-9]+","").toUpperCase();
 
-        Option<GISPoint> point = GridUtil.processGridReference(cleanedRef);
-        if(!point.isEmpty()){
+        GISPoint point = GridUtil.processGridReference(cleanedRef);
+        if(point != null){
             response.put("valid", true);
             Map<String, String> resolutions = GridUtil.getGridRefAsResolutions(cleanedRef);
-            response.put("decimalLatitude", point.get().latitude());
-            response.put("decimalLongitude", point.get().longitude());
-            response.put("coordinateUncertaintyInMeters", point.get().coordinateUncertaintyInMeters());
-            response.put("geodeticDatum", point.get().datum());
-            response.put("bbox", point.get().bboxString());
-            response.put("easting", point.get().easting());
-            response.put("northing", point.get().northing());
-            response.put("minLat", point.get().minLatitude());
-            response.put("minLong", point.get().minLongitude());
-            response.put("maxLat", point.get().maxLatitude());
-            response.put("maxLong", point.get().maxLongitude());
+            response.put("decimalLatitude", point.getLatitude());
+            response.put("decimalLongitude", point.getLongitude());
+            response.put("coordinateUncertaintyInMeters", point.getCoordinateUncertaintyInMeters());
+            response.put("geodeticDatum", point.getDatum());
+            response.put("bbox", point.getBboxString());
+            response.put("easting", point.getEasting());
+            response.put("northing", point.getNorthing());
+            response.put("minLat", point.getMinLatitude());
+            response.put("minLong", point.getMinLongitude());
+            response.put("maxLat", point.getMaxLatitude());
+            response.put("maxLong", point.getMaxLongitude());
             response.put("resolutions", resolutions);
         } else {
             response.put("valid", false);
@@ -181,15 +183,15 @@ public class WMSOSGridController {
                 int gridSize = (Integer) map.get("gridSize");
                 String gridRef = (String) map.get("gridRef");
 
-                Option<GridRef> result = GridUtil.gridReferenceToEastingNorthing(gridRef);
-                if(!result.isEmpty()){
+                GridRef result = GridUtil.gridReferenceToEastingNorthing(gridRef);
+                if(result != null){
 
-                    int[] enForGrid = new int[]{result.get().easting(), result.get().northing()};
+                    int[] enForGrid = new int[]{result.getEasting(), result.getNorthing()};
 
-                    double[] sw = reprojectPoint((double) enForGrid[0], (double) enForGrid[1], GridUtil.OSGB_CRS(), GISUtil.WGS84_EPSG_Code());
-                    double[] se = reprojectPoint((double) enForGrid[0] + gridSize, (double) enForGrid[1], GridUtil.OSGB_CRS(), GISUtil.WGS84_EPSG_Code());
-                    double[] nw = reprojectPoint((double) enForGrid[0], (double) enForGrid[1] + gridSize, GridUtil.OSGB_CRS(), GISUtil.WGS84_EPSG_Code());
-                    double[] ne = reprojectPoint((double) enForGrid[0] + gridSize, (double) enForGrid[1] + gridSize, GridUtil.OSGB_CRS(), GISUtil.WGS84_EPSG_Code());
+                    double[] sw = reprojectPoint((double) enForGrid[0], (double) enForGrid[1], GridUtil.OSGB_CRS, GISUtil.WGS84_EPSG_Code);
+                    double[] se = reprojectPoint((double) enForGrid[0] + gridSize, (double) enForGrid[1], GridUtil.OSGB_CRS, GISUtil.WGS84_EPSG_Code);
+                    double[] nw = reprojectPoint((double) enForGrid[0], (double) enForGrid[1] + gridSize, GridUtil.OSGB_CRS, GISUtil.WGS84_EPSG_Code);
+                    double[] ne = reprojectPoint((double) enForGrid[0] + gridSize, (double) enForGrid[1] + gridSize, GridUtil.OSGB_CRS, GISUtil.WGS84_EPSG_Code);
 
                     map.put("sw", sw);
                     map.put("se", se);
@@ -459,7 +461,7 @@ public class WMSOSGridController {
             //grid lines are rendered after cell fills
             renderGridLines(wmsImg, linesToRender, outlineColour);
         }
-        
+
         if (wmsImg != null && wmsImg.g != null) {
             wmsImg.g.dispose();
             try {
@@ -498,17 +500,17 @@ public class WMSOSGridController {
 
         if(StringUtils.isEmpty(gridRef)) return new HashSet<int[]>();
 
-        Option<au.org.ala.biocache.util.GridRef> gridRefOption = GridUtil.gridReferenceToEastingNorthing(gridRef);
+        GridRef gridRefOption = GridUtil.gridReferenceToEastingNorthing(gridRef);
 
-        if(gridRefOption.isEmpty()) return new HashSet<int[]>();
+        if(gridRefOption == null) return new HashSet<int[]>();
 
         Set<int[]> linesToRender = new HashSet<int[]>();
 
-        au.org.ala.biocache.util.GridRef gr = gridRefOption.get();
+        au.org.ala.biocache.util.GridRef gr = gridRefOption;
 
-        int easting = gr.easting();
-        int northing = gr.northing();
-        int gridSize = (Integer) gr.coordinateUncertainty().get();
+        int easting = gr.getEasting();
+        int northing = gr.getNorthing();
+        int gridSize = gr.getCoordinateUncertainty();
 
         //coordinates in easting / northing of the nearest 10km grid to the bottom,left of this tile
         Integer minEastingOfGridCell  = easting; //may need to use the minimum of each
@@ -523,7 +525,7 @@ public class WMSOSGridController {
                         new double[]{maxEastingOfGridCell, maxNorthingOfGridCell},
                         new double[]{minEastingOfGridCell, maxNorthingOfGridCell},
                 },
-                gr.datum(),
+                gr.getDatum(),
                 targetSrs
         );
 
