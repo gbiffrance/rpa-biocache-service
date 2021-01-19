@@ -21,9 +21,6 @@ import au.org.ala.biocache.service.AuthService;
 import au.org.ala.biocache.util.AssertionUtils;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.apache.commons.httpclient.HttpClient;
-import org.apache.commons.httpclient.methods.PostMethod;
-import org.apache.commons.httpclient.methods.StringRequestEntity;
 import org.apache.log4j.Logger;
 import org.gbif.api.vocabulary.InterpretationRemarkSeverity;
 import org.gbif.api.vocabulary.NameUsageIssue;
@@ -258,7 +255,7 @@ public class AssertionController extends AbstractSecureController {
         if(shouldPerformOperation(request, response)){
             try{
                 UserAssertions ua = storeDao.get(UserAssertions.class, recordUuid);
-                ua.deleteUserAssertion(assertionUuid);
+                ua.deleteUuid(assertionUuid);
                 storeDao.put(recordUuid, ua);
 
                 response.setStatus(HttpServletResponse.SC_OK);
@@ -290,8 +287,11 @@ public class AssertionController extends AbstractSecureController {
         HttpServletResponse response) throws Exception {
         UserAssertions ua = storeDao.get(UserAssertions.class, recordUuid);
         if(ua != null){
-            for (QualityAssertion qa : ua.getUserAssertions()) {
+            for (QualityAssertion qa : ua) {
                 if (qa.getUuid().equals(assertionUuid)) {
+                    // do not return the snapshot
+                    qa.setSnapshot(null);
+
                     return qa;
                 }
             }
@@ -303,6 +303,7 @@ public class AssertionController extends AbstractSecureController {
         }
     }
 
+
     /**
      * Get user assertions
      */
@@ -312,18 +313,31 @@ public class AssertionController extends AbstractSecureController {
         HttpServletResponse response
     ) throws Exception {
         UserAssertions assertions = storeDao.get(UserAssertions.class, recordUuid);
-        if (assertions == null){
-            response.sendError(HttpServletResponse.SC_NOT_FOUND, "Unrecognised record with ID: " + recordUuid);
-            return null;
+        if (assertions == null) {
+            return new ArrayList();
         } else {
-            return assertions.getUserAssertions();
+            // do not return the snapshot
+            for (QualityAssertion qa : assertions) {
+                qa.setSnapshot(null);
+            }
+            return assertions;
         }
+    }
+
+    @Deprecated
+    @RequestMapping(value = {"/occurrences/{recordUuid}/assertionQueries", "/occurrences/{recordUuid}/assertionQueries/"}, method = RequestMethod.GET)
+    public @ResponseBody
+    List<QualityAssertion> getAssertionQueries(
+            @PathVariable(value = "recordUuid") String recordUuid,
+            HttpServletResponse response
+    ) throws Exception {
+        return new ArrayList();
     }
 
     public void setAssertionUtils(AssertionUtils assertionUtils) {
         this.assertionUtils = assertionUtils;
     }
-    
+
     private ErrorCode[] applyi18n(ErrorCode[] errorCodes) {
         //use i18n descriptions
         ErrorCode[] formattedErrorCodes = new ErrorCode[errorCodes.length];

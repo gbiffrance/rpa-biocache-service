@@ -94,6 +94,16 @@
         </dependency>
         <dependency>
             <groupId>org.apache.lucene</groupId>
+            <artifactId>lucene-queryparser</artifactId>
+            <version>${solr.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.lucene</groupId>
+            <artifactId>lucene-analyzers-common</artifactId>
+            <version>${solr.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.lucene</groupId>
             <artifactId>lucene-codecs</artifactId>
             <version>${solr.version}</version>
         </dependency>
@@ -224,7 +234,7 @@
         <dependency>
             <groupId>au.org.ala</groupId>
             <artifactId>ala-name-matching</artifactId>
-            <version>3.4</version>
+            <version>4.0-SNAPSHOT</version>
             <exclusions>
                 <exclusion>
                     <groupId>org.gbif</groupId>
@@ -253,6 +263,10 @@
                 <exclusion>
                     <artifactId>org.slf4j</artifactId>
                     <groupId>slf4j-api</groupId>
+                </exclusion>
+                <exclusion>
+                    <groupId>ch.qos.logback</groupId>
+                    <artifactId>logback-classic</artifactId>
                 </exclusion>
             </exclusions>
         </dependency>

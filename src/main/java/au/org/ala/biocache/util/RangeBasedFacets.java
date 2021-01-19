@@ -14,6 +14,7 @@
  ***************************************************************************/
 package au.org.ala.biocache.util;
 
+import au.org.ala.biocache.dto.OccurrenceIndex20;
 import com.google.common.collect.ImmutableBiMap;
 import org.springframework.context.support.AbstractMessageSource;
 import org.springframework.stereotype.Component;
@@ -52,14 +53,14 @@ public class RangeBasedFacets {
         String unknown = messageSource.getMessage("rangefacet.unknown", null, "Unknown", null);
 
         //construct the bi directional map for the uncertainty ranges
-        ImmutableBiMap<String, String> map = new ImmutableBiMap.Builder<String,String>()
-                .put("coordinate_uncertainty:[0 TO 100]", MessageFormat.format(less_than, "100"))
-                .put("coordinate_uncertainty:[101 TO 500]", MessageFormat.format(between, "100", "500"))
-                .put("coordinate_uncertainty:[501 TO 1000]", MessageFormat.format(between, "500", "1000"))
-                .put("coordinate_uncertainty:[1001 TO 5000]", MessageFormat.format(between,"1000","5000"))
-                .put("coordinate_uncertainty:[5001 TO 10000]", MessageFormat.format(between,"5000","10000"))
-                .put("coordinate_uncertainty:[10001 TO *]", MessageFormat.format(greater_than,"10000"))
-                .put("-coordinate_uncertainty:[* TO *]", unknown).build();
+        ImmutableBiMap<String, String> map = new ImmutableBiMap.Builder<String, String>()
+                .put(OccurrenceIndex20.COORDINATE_UNCERTAINTY + ":[0 TO 100]", MessageFormat.format(less_than, "100"))
+                .put(OccurrenceIndex20.COORDINATE_UNCERTAINTY + ":[101 TO 500]", MessageFormat.format(between, "100", "500"))
+                .put(OccurrenceIndex20.COORDINATE_UNCERTAINTY + ":[501 TO 1000]", MessageFormat.format(between, "500", "1000"))
+                .put(OccurrenceIndex20.COORDINATE_UNCERTAINTY + ":[1001 TO 5000]", MessageFormat.format(between, "1000", "5000"))
+                .put(OccurrenceIndex20.COORDINATE_UNCERTAINTY + ":[5001 TO 10000]", MessageFormat.format(between, "5000", "10000"))
+                .put(OccurrenceIndex20.COORDINATE_UNCERTAINTY + ":[10001 TO *]", MessageFormat.format(greater_than, "10000"))
+                .put("-" + OccurrenceIndex20.COORDINATE_UNCERTAINTY + ":[* TO *]", unknown).build();
 
         rangeFacets.put("uncertainty", map);
     }

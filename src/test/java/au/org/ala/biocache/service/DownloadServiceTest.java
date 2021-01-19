@@ -3,26 +3,6 @@
  */
 package au.org.ala.biocache.service;
 
-import static org.junit.Assert.*;
-
-import java.nio.file.Path;
-import java.util.List;
-import java.util.concurrent.Callable;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Semaphore;
-import java.util.concurrent.TimeUnit;
-
-import org.junit.After;
-import org.junit.Before;
-import org.junit.Ignore;
-import org.junit.Rule;
-import org.junit.Test;
-import org.junit.rules.TemporaryFolder;
-import org.junit.rules.Timeout;
-import org.springframework.context.event.ContextClosedEvent;
-import org.springframework.context.support.GenericApplicationContext;
-
 import au.org.ala.biocache.dao.JsonPersistentQueueDAOImpl;
 import au.org.ala.biocache.dao.PersistentQueueDAO;
 import au.org.ala.biocache.dao.SearchDAOImpl;
@@ -31,6 +11,17 @@ import au.org.ala.biocache.dto.DownloadDetailsDTO.DownloadType;
 import au.org.ala.biocache.dto.DownloadRequestParams;
 import au.org.ala.biocache.dto.FacetThemes;
 import au.org.ala.biocache.util.thread.DownloadCreator;
+import org.junit.*;
+import org.junit.rules.TemporaryFolder;
+import org.junit.rules.Timeout;
+import org.springframework.context.event.ContextClosedEvent;
+import org.springframework.context.support.GenericApplicationContext;
+
+import java.nio.file.Path;
+import java.util.List;
+import java.util.concurrent.*;
+
+import static org.junit.Assert.*;
 
 /**
  * Test for {@link DownloadService}
@@ -81,7 +72,8 @@ public class DownloadServiceTest {
 
         testService = new DownloadService() {
             {
-                sensitiveAccessRoles = "{}";
+                sensitiveAccessRoles10 = "{}";
+                sensitiveAccessRoles20 = "{}";
             }
 
             protected DownloadCreator getNewDownloadCreator() {

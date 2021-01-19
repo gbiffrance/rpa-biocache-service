@@ -15,9 +15,7 @@
 package au.org.ala.biocache.service;
 
 import au.org.ala.biocache.dao.SearchDAO;
-import au.org.ala.biocache.dto.SpatialSearchRequestParams;
-import au.org.ala.biocache.dto.SpeciesImageDTO;
-import au.org.ala.biocache.dto.SpeciesImagesDTO;
+import au.org.ala.biocache.dto.*;
 import au.org.ala.biocache.util.SearchUtils;
 import com.fasterxml.jackson.core.type.TypeReference;
 import org.apache.log4j.Logger;
@@ -69,22 +67,22 @@ public class SpeciesImageService {
                 SpatialSearchRequestParams params = new SpatialSearchRequestParams();
                 params.setPageSize(1);
                 params.setFacet(true);
-                params.setFacets(new String[]{"lft"});
+                params.setFacets(new String[]{OccurrenceIndex.LFT});
                 params.setFlimit(99999999);
-                params.setFl("data_resource_uid,image_url");
-                params.setQ("image_url:*");
+                params.setFl(OccurrenceIndex20.DATA_RESOURCE_UID + "," + OccurrenceIndex20.IMAGE_URL);
+                params.setQ(OccurrenceIndex20.IMAGE_URL + ":*");
 
                 QueryResponse qr = searchDAO.searchGroupedFacets(params);
 
                 Map<Long, SpeciesImageDTO> map = new HashMap();
 
-                for (SimpleOrderedMap item : SearchUtils.getList(qr.getResponse(), "facets", "lft", "buckets")) {
-                    String dataResourceUid = (String) SearchUtils.getVal(item, "data_resource_uid", "buckets", 0, 0);
-                    String imageUrl = (String) SearchUtils.getVal(item, "image_url", "buckets", 0, 0);
+                for (SimpleOrderedMap item : SearchUtils.getList(qr.getResponse(), "facets", OccurrenceIndex.LFT, "buckets")) {
+                    String dataResourceUid = (String) SearchUtils.getVal(item, OccurrenceIndex20.DATA_RESOURCE_UID, "buckets", 0, 0);
+                    String imageUrl = (String) SearchUtils.getVal(item, OccurrenceIndex20.IMAGE_URL, "buckets", 0, 0);
                     SpeciesImageDTO image = new SpeciesImageDTO(dataResourceUid, imageUrl);
-                    image.setCount((Long) item.getVal(1));
+                    image.setCount((Integer) item.getVal(1));
                     try {
-                        map.put((Long) item.getVal(0), image);
+                        map.put(((Integer) item.getVal(0)).longValue(), image);
                     } catch (Exception e) {
                     }
                 }

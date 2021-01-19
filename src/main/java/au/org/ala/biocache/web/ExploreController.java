@@ -17,9 +17,7 @@ package au.org.ala.biocache.web;
 
 import au.org.ala.biocache.dao.QidCacheDAO;
 import au.org.ala.biocache.dao.SearchDAO;
-import au.org.ala.biocache.dao.SearchDAOImpl;
 import au.org.ala.biocache.dto.*;
-import au.org.ala.biocache.dto.Qid;
 import com.ctc.wstx.util.URLUtil;
 import net.sf.json.JSONArray;
 import net.sf.json.JSONObject;
@@ -33,7 +31,6 @@ import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.util.StreamUtils;
 import org.springframework.web.bind.annotation.*;
-import retrofit2.http.Url;
 
 import javax.inject.Inject;
 import javax.servlet.ServletOutputStream;
@@ -157,32 +154,34 @@ public class ExploreController {
 
         //get the species group occurrence counts
         requestParams.setFormattedQuery(null);
-        requestParams.setFacets(new String[]{"species_subgroup"});
+        requestParams.setFacets(new String[]{});
         requestParams.setPageSize(0);
         requestParams.setFlimit(-1);
         if(StringUtils.isNotBlank(speciesGroup)){
-            requestParams.setFq(new String[]{"species_group:\"" + speciesGroup +"\""});
+            requestParams.setFq(new String[]{OccurrenceIndex.SPECIES_GROUP + ":\"" + speciesGroup + "\""});
         }
 
         //retrieve a list of subgroups with occurrences matching the query
         SearchResultDTO speciesSubgroupCounts = searchDao.findByFulltextSpatialQuery(requestParams, null);
-        Map<String, Long> occurrenceCounts = new HashMap<String,Long>();
-        if(speciesSubgroupCounts.getFacetResults().size() > 0) {
+        Map<String, Long> occurrenceCounts = new HashMap<String, Long>();
+        if (speciesSubgroupCounts.getFacetResults().size() > 0) {
             FacetResultDTO result = speciesSubgroupCounts.getFacetResults().iterator().next();
-            for(FieldResultDTO fr: result.getFieldResult()){
+            for (FieldResultDTO fr : result.getFieldResult()) {
                 occurrenceCounts.put(fr.getLabel(), fr.getCount());
             }
         }
 
-        //do a facet query for each species subgroup
-        for(String ssg : occurrenceCounts.keySet()){
+        String taxonName = requestParams.getVersion() == 1.0 ? OccurrenceIndex10.TAXON_NAME : OccurrenceIndex20.TAXON_NAME;
 
-            requestParams.setQ("species_subgroup:\"" + ssg +"\"");
+        //do a facet query for each species subgroup
+        for (String ssg : occurrenceCounts.keySet()) {
+
+            requestParams.setQ(OccurrenceIndex.SPECIES_SUBGROUP + ":\"" + ssg + "\"");
             requestParams.setFormattedQuery(null);
-            requestParams.setFacets(new String[]{"taxon_name"});
+            requestParams.setFacets(new String[]{taxonName});
 
             List<FacetResultDTO> facetResultDTO = searchDao.getFacetCounts(requestParams);
-            if(facetResultDTO.size() > 0){
+            if (facetResultDTO.size() > 0) {
                 FacetResultDTO result = facetResultDTO.get(0);
 
                 String parentName = parentLookup.get(ssg.toLowerCase());
@@ -284,14 +283,16 @@ public class ExploreController {
      */
     @RequestMapping(value="/explore/counts/group/{group}*", method = RequestMethod.GET)
     public @ResponseBody Integer[] getYourAreaCount(SpatialSearchRequestParams requestParams,
-            @PathVariable(value="group") String group) throws Exception{
+            @PathVariable(value="group") String group) throws Exception {
+        String taxonName = requestParams.getVersion() == 1.0 ? OccurrenceIndex10.TAXON_NAME : OccurrenceIndex20.TAXON_NAME;
+
         addGroupFilterToQuery(requestParams, group);
         requestParams.setPageSize(0);
-            requestParams.setFacets(new String[]{"taxon_name"});
+        requestParams.setFacets(new String[]{taxonName});
         requestParams.setFlimit(-1);
         SearchResultDTO results = searchDao.findByFulltextSpatialQuery(requestParams, null);
         Integer speciesCount = 0;
-        if(results.getFacetResults().size() > 0){
+        if (results.getFacetResults().size() > 0) {
             List<FieldResultDTO> fieldResults = results.getFacetResults().iterator().next().getFieldResult();
             int count = 0;
             for (FieldResultDTO fr :  fieldResults){
@@ -311,7 +312,7 @@ public class ExploreController {
      * @param group
      */
     private void addGroupFilterToQuery(SpatialSearchRequestParams requestParams, String group){
-        addFacetFilterToQuery(requestParams, "species_group", group);
+        addFacetFilterToQuery(requestParams, OccurrenceIndex.SPECIES_GROUP, group);
     }
 
     /**
@@ -319,17 +320,19 @@ public class ExploreController {
      * @param requestParams
      * @param facetValue
      */
-    private void addFacetFilterToQuery(SpatialSearchRequestParams requestParams, String facetName, String facetValue){
+    private void addFacetFilterToQuery(SpatialSearchRequestParams requestParams, String facetName, String facetValue) {
+        String rank = requestParams.getVersion() == 1.0 ? OccurrenceIndex10.RANK : OccurrenceIndex20.RANK;
+
         StringBuilder sb = new StringBuilder();
-        if(requestParams.getQ() != null && !requestParams.getQ().isEmpty())
+        if (requestParams.getQ() != null && !requestParams.getQ().isEmpty())
             sb.append(requestParams.getQ());
-        else{
+        else {
             sb.append("*:*");
         }
-        if(!facetValue.equals("ALL_SPECIES"))
+        if (!facetValue.equals("ALL_SPECIES"))
             sb.append(" AND " + facetName + ":").append(facetValue);
         //now ignore the records that have been identified to a rank above species
-        sb.append( " AND -rank:kingdom AND -rank:phylum AND -rank:class AND -rank:order AND -rank:family AND -rank:genus");
+        sb.append(" AND -" + rank + ":kingdom AND -" + rank + ":phylum AND -" + rank + ":class AND -" + rank + ":order AND -" + rank + ":family AND -" + rank + ":genus");
         //String query = sb.togroup.equals("ALL_SPECIES")? "*:*" : "species_group:" + group;
         requestParams.setQ(sb.toString());
         //don't care about the formatted query
@@ -392,10 +395,10 @@ public class ExploreController {
     }
 
     private void applyFacetForCounts(SpatialSearchRequestParams requestParams, boolean useCommonName){
-    	if(useCommonName)
-    		requestParams.setFacets(new String[]{SearchDAOImpl.COMMON_NAME_AND_LSID});
-    	else
-    		requestParams.setFacets(new String[]{SearchDAOImpl.NAMES_AND_LSID});
+        if (useCommonName)
+            requestParams.setFacets(new String[]{OccurrenceIndex.COMMON_NAME_AND_LSID});
+        else
+            requestParams.setFacets(new String[]{OccurrenceIndex.NAMES_AND_LSID});
     }
 
     /**
@@ -516,10 +519,10 @@ public class ExploreController {
         subQuery.setQ("qid:" + subQueryQid);
 
         if (parentQuery.getQ() == null) {
-            parentQuery.setQ("geospatial_kosher:*");
+            parentQuery.setQ(OccurrenceIndex.GEOSPATIAL_KOSHER + ":*");
         }
         if (parentQuery.getFacets() == null || parentQuery.getFacets().length == 0) {
-            parentQuery.setFacets(new String[]{SearchDAOImpl.NAMES_AND_LSID});
+            parentQuery.setFacets(new String[]{OccurrenceIndex.NAMES_AND_LSID});
         }
 
         if (subQuery != null) {
@@ -567,19 +570,20 @@ public class ExploreController {
     * @return
     */
     @RequestMapping(value = "/explore/endemic/species.csv", method = RequestMethod.GET)
-    public void getEndemicSpeciesCSV(SpatialSearchRequestParams requestParams,HttpServletResponse response) throws Exception{
-        requestParams.setFacets(new String[]{SearchDAOImpl.NAMES_AND_LSID});
-        requestParams.setFq((String[])ArrayUtils.add(requestParams.getFq(), "species_guid:[* TO *]"));
+    public void getEndemicSpeciesCSV(SpatialSearchRequestParams requestParams,HttpServletResponse response) throws Exception {
+        String speciesGuid = requestParams.getVersion() == 1.0 ? OccurrenceIndex10.SPECIESID : OccurrenceIndex20.SPECIESID;
+        requestParams.setFacets(new String[]{OccurrenceIndex.NAMES_AND_LSID});
+        requestParams.setFq((String[]) ArrayUtils.add(requestParams.getFq(), speciesGuid + ":[* TO *]"));
         List<FieldResultDTO> list = getSpeciesOnlyInWKT(requestParams, response);
         response.setCharacterEncoding("UTF-8");
         response.setContentType("text/plain");
         java.io.PrintWriter writer = response.getWriter();
         writer.write("Family,Scientific name,Common name,Taxon rank,LSID,# Occurrences");
-        for(FieldResultDTO item: list){
+        for (FieldResultDTO item : list) {
             String s = item.getLabel();
             if (s.startsWith("\"") && s.endsWith("\"") && s.length() > 2) s = s.substring(1, s.length() - 1);
-            String[] values = s.split("\\|",6);
-            if(values.length >= 5){
+            String[] values = s.split("\\|", 6);
+            if (values.length >= 5) {
                 writer.write("\n"+values[4]+",\""+values[0]+"\",\""+values[2]+"\",,"+values[1] + ","+item.getCount());
             }
         }
@@ -611,10 +615,10 @@ public class ExploreController {
         subQuery.setQ("qid:" + subQueryQid);
 
         if (parentQuery.getQ() == null) {
-            parentQuery.setQ("geospatial_kosher:*");
+            parentQuery.setQ(OccurrenceIndex.GEOSPATIAL_KOSHER + ":*");
         }
         if (parentQuery.getFacets() == null || parentQuery.getFacets().length == 0) {
-            parentQuery.setFacets(new String[]{SearchDAOImpl.NAMES_AND_LSID});
+            parentQuery.setFacets(new String[]{OccurrenceIndex.NAMES_AND_LSID});
         }
 
         if (subQuery != null) {

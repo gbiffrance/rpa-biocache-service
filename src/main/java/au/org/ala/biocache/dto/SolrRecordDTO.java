@@ -14,10 +14,7 @@
  */
 package au.org.ala.biocache.dto;
 
-import net.sf.json.JSONObject;
-
 import java.io.Serializable;
-import java.util.List;
 import java.util.Map;
 
 /**
@@ -30,6 +27,7 @@ public class SolrRecordDTO implements Serializable {
 
     public Map<String, Object> legacyFormat() {
 
+        //TODO:
 //        private FullRecord raw;
 //        private FullRecord processed;
 ////    private FullRecord consensus;

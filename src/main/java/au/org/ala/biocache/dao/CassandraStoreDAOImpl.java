@@ -14,7 +14,6 @@
  ***************************************************************************/
 package au.org.ala.biocache.dao;
 
-import au.org.ala.biocache.dto.QualityAssertion;
 import com.datastax.driver.core.*;
 import com.datastax.driver.core.policies.ExponentialReconnectionPolicy;
 import com.datastax.driver.extras.codecs.MappingCodec;

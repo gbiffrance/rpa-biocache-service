@@ -1,7 +1,6 @@
 package au.org.ala.biocache.dto;
 
 import org.apache.solr.common.SolrDocument;
-import org.apache.solr.common.SolrDocumentList;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -17,25 +16,19 @@ public class DuplicateRecordDetails {
     List<DuplicateRecordDetails> duplicates;
     List<String> dupTypes;
 
-    public static final String DUPLICATE_OF = "duplicate_of";
-    public static final String DUPLICATE_STATUS = "duplicate_status";
-    public static final String DUPLICATE_REASONS = "duplicate_reasons";
-    public static final String ID = "ID";
-
-
     public DuplicateRecordDetails() {};
 
     public DuplicateRecordDetails(SolrDocument d) {
-        this.id = (String) d.getFieldValue(ID);
-        this.status = (String) d.getFieldValue(DUPLICATE_STATUS);
+        this.id = (String) d.getFieldValue(OccurrenceIndex.ID);
+        this.status = (String) d.getFieldValue(OccurrenceIndex.DUPLICATE_STATUS);
 
         if ("D".equals(status)) {
             // is duplicate
             this.dupTypes = new ArrayList();
-            for (Object dupType : d.getFieldValues(DUPLICATE_REASONS)) {
+            for (Object dupType : d.getFieldValues(OccurrenceIndex.DUPLICATE_REASONS)) {
                 dupTypes.add(dupType.toString());
             }
-            this.duplicateOf = (String) d.getFieldValue(DUPLICATE_OF);
+            this.duplicateOf = (String) d.getFieldValue(OccurrenceIndex.DUPLICATE_OF);
         }
     }
 

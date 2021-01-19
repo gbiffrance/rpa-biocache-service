@@ -6,11 +6,12 @@ import java.util.UUID;
 /**
  * A companion object for the QualityAssertion class that provides factory
  * type functionality.
- *
+ * <p>
  * Merged from biocache-store
  */
 public class QualityAssertion {
     String uuid = UUID.randomUUID().toString();
+    ;
     String referenceRowKey;
     String name;
     Integer code;
@@ -25,8 +26,11 @@ public class QualityAssertion {
     String userEntityUid;
     String userEntityName;
     String created = new Date().toString();
+    String snapshot;
+    Boolean problemAsserted = false;
 
-    public QualityAssertion() {}
+    public QualityAssertion() {
+    }
 
     public QualityAssertion(ErrorCode errorCode, String comment) {
         this.name = errorCode.name;
@@ -158,5 +162,21 @@ public class QualityAssertion {
 
     public void setCreated(String created) {
         this.created = created;
+    }
+
+    public String getSnapshot() {
+        return snapshot;
+    }
+
+    public void setSnapshot(String snapshot) {
+        this.snapshot = snapshot;
+    }
+
+    public Boolean getProblemAsserted() {
+        return problemAsserted;
+    }
+
+    public void setProblemAsserted(Boolean problemAsserted) {
+        this.problemAsserted = problemAsserted;
     }
 }

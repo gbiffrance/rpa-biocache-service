@@ -51,6 +51,7 @@ import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import javax.validation.Valid;
 import java.io.*;
+import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -240,8 +241,16 @@ public class OccurrenceController extends AbstractSecureController {
     return "oldapi";
   }
 
+  @RequestMapping(value = "/upload/dynamicFacets", method = RequestMethod.GET)
+  public @ResponseBody
+  Map emptyJson() {
+    Map<String, String> map = new HashMap();
+    return map;
+  }
+
   @RequestMapping(value = "/active/download/stats", method = RequestMethod.GET)
-  public @ResponseBody List<DownloadDetailsDTO> getCurrentDownloads() {
+  public @ResponseBody
+  List<DownloadDetailsDTO> getCurrentDownloads() {
     return downloadService.getCurrentDownloads();
   }
 
@@ -559,7 +568,7 @@ public class OccurrenceController extends AbstractSecureController {
     SpatialSearchRequestParams srp = new SpatialSearchRequestParams();
     srp.setQ("lsid:" + guid);
     srp.setPageSize(0);
-    srp.setFacets(new String[] {"image_url"});
+    srp.setFacets(new String[]{OccurrenceIndex.IMAGE_URL});
     SearchResultDTO results = searchDAO.findByFulltextSpatialQuery(srp, null);
     if (results.getFacetResults().size() > 0) {
       List<FieldResultDTO> fieldResults =
@@ -586,7 +595,7 @@ public class OccurrenceController extends AbstractSecureController {
     NativeDTO adto = new NativeDTO();
 
     if (guid != null) {
-      adto = getIsAustraliaForGuid(guid);
+      adto = getIsAustraliaForGuid(guid, 2.0);
     }
 
     return adto;
@@ -614,7 +623,7 @@ public class OccurrenceController extends AbstractSecureController {
 
     if (guidArray != null) {
       for (String guid : guidArray) {
-        nativeDTOs.add(getIsAustraliaForGuid(guid));
+        nativeDTOs.add(getIsAustraliaForGuid(guid, 2.0));
         logger.debug("guid = " + guid);
       }
     }
@@ -628,17 +637,17 @@ public class OccurrenceController extends AbstractSecureController {
    * @param guid
    * @return
    */
-  private NativeDTO getIsAustraliaForGuid(String guid) {
+  private NativeDTO getIsAustraliaForGuid(String guid, Double version) {
     SpatialSearchRequestParams requestParams = new SpatialSearchRequestParams();
     requestParams.setPageSize(0);
-    requestParams.setFacets(new String[] {});
+    requestParams.setFacets(new String[]{});
     String query =
-        "lsid:"
-            + guid
-            + " AND "
-            + "(country:\""
-            + nativeCountry
-            + "\" OR state:[* TO *]) AND geospatial_kosher:true";
+            "lsid:"
+                    + guid
+                    + " AND "
+                    + "(" + COUNTRY + ":\""
+                    + nativeCountry
+                    + "\" OR " + STATE + ":[* TO *]) AND " + GEOSPATIAL_KOSHER + ":true";
     requestParams.setQ(query);
     NativeDTO adto = new NativeDTO();
     adto.setTaxonGuid(guid);
@@ -648,7 +657,7 @@ public class OccurrenceController extends AbstractSecureController {
     if (adto.isHasOccurrences()) {
       // check to see if the records have only been provided by citizen science
       // TODO change this to a confidence setting after it has been included in the index
-      requestParams.setQ("lsid:" + guid + " AND (provenance:\"Published dataset\")");
+      requestParams.setQ("lsid:" + guid + " AND (" + PROVENANCE + ":\"Published dataset\")");
       results = searchDAO.findByFulltextSpatialQuery(requestParams, null);
       adto.setHasCSOnly(results.getTotalRecords() == 0);
     }
@@ -1179,13 +1188,14 @@ public class OccurrenceController extends AbstractSecureController {
       if (normalised != null) guids.add(normalised);
     }
     response.setHeader(
-        "Cache-Control",
-        occurrenceCacheControlHeaderPublicOrPrivate
-            + ", max-age="
-            + occurrenceCacheControlHeaderMaxAge);
+            "Cache-Control",
+            occurrenceCacheControlHeaderPublicOrPrivate
+                    + ", max-age="
+                    + occurrenceCacheControlHeaderMaxAge);
     response.setHeader("ETag", occurrenceETag.get());
 
-    return searchDAO.getOccurrenceCountsForTaxa(guids, filterQueries);
+    // All request using 2.0 SOLR Schema
+    return searchDAO.getOccurrenceCountsForTaxa(guids, filterQueries, 2.0);
   }
 
   /**
@@ -1402,7 +1412,7 @@ public class OccurrenceController extends AbstractSecureController {
   @RequestMapping(value = "/occurrences/coordinates*")
   public void dumpDistinctLatLongs(SearchRequestParams requestParams, HttpServletResponse response)
       throws Exception {
-    requestParams.setFacets(new String[] {"lat_long"});
+    requestParams.setFacets(new String[]{OccurrenceIndex.LAT_LNG});
     if (requestParams.getQ().length() < 1) requestParams.setQ("*:*");
     try {
       ServletOutputStream out = response.getOutputStream();
@@ -1425,47 +1435,82 @@ public class OccurrenceController extends AbstractSecureController {
    * @param uuid
    * @throws Exception
    */
+  @Deprecated // Remove when support for version 1.0 is no longer required.
   @RequestMapping(
-      value = {"/occurrence/compare/{uuid}.json", "/occurrence/compare/{uuid}"},
-      method = RequestMethod.GET)
+          value = {"/occurrence/compare/{uuid}.json", "/occurrence/compare/{uuid}"},
+          method = RequestMethod.GET)
   public @ResponseBody Object showOccurrence(@PathVariable("uuid") String uuid) throws Exception {
-
     SpatialSearchRequestParams idRequest = new SpatialSearchRequestParams();
-    idRequest.setQ("id:\"" + uuid + "\"");
+    idRequest.setVersion(1.0);
+    idRequest.setQ(OccurrenceIndex.ID + ":\"" + uuid + "\"");
+    idRequest.setFl(StringUtils.join(indexDao.getIndexedFieldsMap().keySet(), ","));
     idRequest.setFacet(false);
     SolrDocument sd = searchDAO.findByFulltext(idRequest).get(0);
+    Map fullRecord = mapAsFullRecord(sd, false);
 
-    Map<String, String> rawToProcessed = occurrenceUtils.getRawToProcessedMapping();
+    Map rawGroups = (Map) ((Map) fullRecord.get("raw"));
+    Map processedGroups = (Map) ((Map) fullRecord.get("processed"));
 
-    // substitute the values for recordedBy if it is an authenticated user
-    List<Comparison> comparison = new ArrayList<>();
-    for (Map.Entry<String, String> mapping : rawToProcessed.entrySet()) {
-      Object raw = null;
-      Object processed = null;
+    Set groupKeys = new HashSet();
+    groupKeys.addAll(rawGroups.keySet());
+    groupKeys.addAll(processedGroups.keySet());
 
-      if (sd.containsKey(mapping.getKey())) {
-        raw = sd.get(mapping.getKey());
+    // remove keys not required
+    groupKeys.remove("el");
+    groupKeys.remove("cl");
+    groupKeys.remove("queryAssertions");
+    groupKeys.remove("miscProperties");
+
+    Map groups = new HashMap();
+    for (Object groupKey : groupKeys) {
+
+      Object raw = rawGroups.get(groupKey);
+      Object processed = processedGroups.get(groupKey);
+
+      if (raw == null || processed == null || !(raw instanceof Map) || !(processed instanceof Map)) {
+        continue;
       }
-      if (sd.containsKey(mapping.getValue())) {
-        processed = sd.get(mapping.getValue());
-      }
 
-      if (raw != null || processed != null) {
-        Comparison c = new Comparison();
-        c.setKey(mapping.getKey());
+      Map rawMap = (Map) raw;
+      Map processedMap = (Map) processed;
 
-        if (raw instanceof String && !StringUtils.isEmpty((String) raw)) {
-          c.setRaw(authService.substituteEmailAddress((String) raw));
+      Set keys = new HashSet();
+      keys.addAll(rawMap.keySet());
+      keys.addAll(processedMap.keySet());
+
+      // substitute the values for recordedBy if it is an authenticated user
+      List<Comparison> comparison = new ArrayList<>();
+      for (Object key : keys) {
+        Object r = rawMap.get(key);
+        Object p = processedMap.get(key);
+
+        if (r != null || p != null) {
+          Comparison c = new Comparison();
+          c.setName((String) key);
+
+          if (r instanceof String && !StringUtils.isEmpty((String) r)) {
+            c.setRaw(authService.substituteEmailAddress((String) r));
+          } else if (r != null) {
+            c.setRaw(r.toString());
+          } else {
+            c.setRaw("");
+          }
+
+          if (p instanceof String && !StringUtils.isEmpty((String) p)) {
+            c.setProcessed(authService.substituteEmailAddress((String) p));
+          } else if (p != null) {
+            c.setProcessed(p.toString());
+          } else {
+            c.setProcessed("");
+          }
+
+          comparison.add(c);
         }
-
-        if (processed instanceof String && !StringUtils.isEmpty((String) processed)) {
-          c.setProcessed(authService.substituteEmailAddress((String) processed));
-        }
-
-        comparison.add(c);
       }
+
+      groups.put(StringUtils.capitalize((String) groupKey), comparison);
     }
-    return comparison;
+    return groups;
   }
 
   /**
@@ -1503,18 +1548,19 @@ public class OccurrenceController extends AbstractSecureController {
       },
       method = RequestMethod.GET)
   public @ResponseBody Object showOccurrence(
-      @PathVariable("uuid") String uuid,
-      @RequestParam(value = "apiKey", required = false) String apiKey,
-      @RequestParam(value = "ip", required = false) String ip,
-      @RequestParam(value = "im", required = false) String im,
-      HttpServletRequest request,
-      HttpServletResponse response)
+          @PathVariable("uuid") String uuid,
+          @RequestParam(value = "apiKey", required = false) String apiKey,
+          @RequestParam(value = "ip", required = false) String ip,
+          @RequestParam(value = "im", required = false) String im,
+          @RequestParam(value = "version", required = false, defaultValue = "1.0") Double version,
+          HttpServletRequest request,
+          HttpServletResponse response)
       throws Exception {
     ip = ip == null ? getIPAddress(request) : ip;
     if (apiKey != null) {
-      return showSensitiveOccurrence(uuid, apiKey, ip, im, request, response);
+      return showSensitiveOccurrence(uuid, apiKey, ip, im, version, request, response);
     }
-    return getOccurrenceInformation(uuid, ip, im, request, false);
+    return getOccurrenceInformation(uuid, ip, im, request, false, version);
   }
 
   @RequestMapping(
@@ -1526,28 +1572,30 @@ public class OccurrenceController extends AbstractSecureController {
       },
       method = RequestMethod.GET)
   public @ResponseBody Object showSensitiveOccurrence(
-      @PathVariable("uuid") String uuid,
-      @RequestParam(value = "apiKey", required = true) String apiKey,
-      @RequestParam(value = "ip", required = false) String ip,
-      @RequestParam(value = "im", required = false) String im,
-      HttpServletRequest request,
-      HttpServletResponse response)
+          @PathVariable("uuid") String uuid,
+          @RequestParam(value = "apiKey", required = true) String apiKey,
+          @RequestParam(value = "ip", required = false) String ip,
+          @RequestParam(value = "im", required = false) String im,
+          @RequestParam(value = "version", required = false, defaultValue = "1.0") Double version,
+          HttpServletRequest request,
+          HttpServletResponse response)
       throws Exception {
     ip = ip == null ? getIPAddress(request) : ip;
     if (shouldPerformOperation(apiKey, response)) {
-      return getOccurrenceInformation(uuid, ip, im, request, true);
+      return getOccurrenceInformation(uuid, ip, im, request, true, version);
     }
     return null;
   }
 
   private Object getOccurrenceInformation(
-      String uuid, String ip, String im, HttpServletRequest request, boolean includeSensitive)
+          String uuid, String ip, String im, HttpServletRequest request, boolean includeSensitive, Double version)
       throws Exception {
     logger.debug("Retrieving occurrence record with guid: '" + uuid + "'");
 
     SpatialSearchRequestParams idRequest = new SpatialSearchRequestParams();
-    idRequest.setQ("id:\"" + uuid + "\"");
+    idRequest.setQ(OccurrenceIndex.ID + ":\"" + uuid + "\"");
     idRequest.setFacet(false);
+    idRequest.setFl(StringUtils.join(indexDao.getIndexedFieldsMap().keySet(), ","));
     SolrDocument sd = searchDAO.findByFulltext(idRequest).get(0);
 
     // obscure email addresses, or anything else containing @
@@ -1601,7 +1649,10 @@ public class OccurrenceController extends AbstractSecureController {
       UserAssertions userAssertions = storeDao.get(UserAssertions.class, uuid);
       // Legacy integration - fix up the user assertions - legacy - to add replace with CAS IDs....
       if (userAssertions != null) {
-        for (QualityAssertion ua : userAssertions.getUserAssertions()) {
+        for (QualityAssertion ua : userAssertions) {
+          // remove snapshot
+          ua.setSnapshot(null);
+
           if (ua.getUserId().contains("@")) {
             String email = ua.getUserId();
             String userId = authService.getMapOfEmailToId().get(email);
@@ -1613,38 +1664,530 @@ public class OccurrenceController extends AbstractSecureController {
       }
 
       // retrieve details of the media files
-      if (sd.getFieldValue("sounds") != null) {
+      if (sd.getFieldValue(SOUNDS) != null) {
         List<MediaDTO> soundDtos =
-            getSoundDtos(
-                (String[]) JSONArray.fromObject(sd.getFieldValue("sounds")).toArray(new String[0]));
+                getSoundDtos(
+                        (String[]) JSONArray.fromObject(sd.getFieldValue(SOUNDS)).toArray(new String[0]));
         if (!soundDtos.isEmpty()) {
-          sd.setField("sounds", soundDtos);
+          sd.setField(SOUNDS, soundDtos);
         }
       }
 
       // ADD THE DIFFERENT IMAGE FORMATS...thumb,small,large,raw
       // default lookupImageMetadata to "true"
-      if (sd.getFieldValue("all_image_url") != null) {
+      if (sd.getFieldValue(ALL_IMAGE_URL) != null) {
         setupImageUrls(
-            uuid,
-            (String[])
-                JSONArray.fromObject(sd.getFieldValue("all_image_url")).toArray(new String[0]),
-            im == null || !im.equalsIgnoreCase("false"));
+                uuid,
+                (String[])
+                        JSONArray.fromObject(sd.getFieldValue(ALL_IMAGE_URL)).toArray(new String[0]),
+                im == null || !im.equalsIgnoreCase("false"));
       }
 
       // log the statistics for viewing the record
-      logViewEvent(ip, sd, null, "Viewing Occurrence Record " + uuid);
+      logViewEvent(ip, sd, null, "Viewing Occurrence Record " + uuid, version);
     }
 
-    return sd;
+    boolean includeImageMetadata = (im == null || !im.equalsIgnoreCase("false"));
+    return version == 1.0 ? mapAsFullRecord(sd, includeImageMetadata) : sd;
   }
 
-  private void logViewEvent(String ip, SolrDocument occ, String email, String reason) {
+  /**
+   * @param sd
+   * @return
+   */
+  private Map mapAsFullRecord(SolrDocument sd, Boolean includeImageMetadata) {
+    Map map = new HashMap();
+
+    map.put("raw", fullRecord("raw_", sd));
+    map.put("processed", fullRecord("", sd));
+    map.put("systemAssertions", systemAssertions(sd));
+    map.put("userAssertions", userAssertions(sd));
+
+    Object value = sd.getFieldValue(OccurrenceIndex.ALL_IMAGE_URL);
+    if (value != null) {
+      map.put(
+              "images",
+              setupImageUrls(
+                      (String) sd.getFieldValue(OccurrenceIndex.ID),
+                      (String[]) JSONArray.fromObject(value).toArray(new String[0]),
+                      includeImageMetadata));
+    }
+
+    map.put("alaUserId", sd.getFieldValue(OccurrenceIndex20.ALA_USER_ID));
+
+    return map;
+  }
+
+  private void addLayerValues(SolrDocument sd, Map map, String key, String prefix) {
+    String regex = "^" + key + "[0-9]+$";
+    for (Map.Entry<String, Object> es : sd.entrySet()) {
+      if (es.getKey().matches(regex)) {
+        map.put(es.getKey(), es.getValue());
+      }
+    }
+  }
+
+  private void add(SolrDocument sd, Map map, String key, String prefix) {
+    map.put(key, sd.getFieldValue(prefix + key));
+  }
+
+  private void addImages(SolrDocument sd, Map map, String dstKey, String srcKey, String prefix) {
+    Object value = sd.getFieldValue(prefix + srcKey);
+    if (value != null) {
+      map.put(
+              dstKey,
+              setupImageUrls(
+                      (String) sd.getFieldValue(OccurrenceIndex.ID),
+                      (String[]) JSONArray.fromObject(value).toArray(new String[0]),
+                      false));
+    }
+  }
+
+  private void addFirst(SolrDocument sd, Map map, String key, String prefix) {
+    map.put(key, sd.getFirstValue(prefix + key));
+  }
+
+  private List userAssertions(SolrDocument sd) {
+    return new ArrayList();
+  }
+
+  /**
+   * Build a FullRecord, raw or processed, from a SolrDocument.
+   * <p>
+   * Only for use with Version 1.0 requests.
+   *
+   * @param prefix Version 2.0 SOLR schema uses a prefix "raw_" for all raw fields.
+   * @param sd     SolrDocument
+   * @return
+   */
+  Map fullRecord(String prefix, SolrDocument sd) {
+    Map fullRecord = new HashMap();
+    fullRecord.put("rowKey", ID); // Use the processed ID for compatability
+
+    // au.org.ala.biocache.model.Occurrence
+    Map occurrence = new HashMap();
+    fullRecord.put("occurrence", occurrence);
+    add(sd, occurrence, "occurrenceID", prefix);
+    add(sd, occurrence, "accessRights", prefix);
+    add(sd, occurrence, "associatedMedia", prefix);
+    add(sd, occurrence, "associatedOccurrences", prefix);
+    add(sd, occurrence, "associatedReferences", prefix);
+    add(sd, occurrence, "associatedSequences", prefix);
+    add(sd, occurrence, "associatedTaxa", prefix);
+    add(sd, occurrence, "basisOfRecord", prefix);
+    add(sd, occurrence, "behavior", prefix);
+    add(sd, occurrence, "bibliographicCitation", prefix);
+    add(sd, occurrence, "catalogNumber", prefix);
+    add(sd, occurrence, "collectionCode", prefix);
+    add(sd, occurrence, "collectionID", prefix);
+    add(sd, occurrence, "dataGeneralizations", prefix);        //used for sensitive data information
+    add(sd, occurrence, "datasetID", prefix);
+    add(sd, occurrence, "datasetName", prefix);
+    add(sd, occurrence, "disposition", prefix);
+    add(sd, occurrence, "dynamicProperties", prefix);
+    add(sd, occurrence, "establishmentMeans", prefix);
+    add(sd, occurrence, "fieldNotes", prefix);
+    add(sd, occurrence, "fieldNumber", prefix);
+    add(sd, occurrence, "identifier", prefix);
+    add(sd, occurrence, "individualCount", prefix);
+    add(sd, occurrence, "individualID", prefix);
+    add(sd, occurrence, "informationWithheld", prefix);   //used for sensitive data information
+    add(sd, occurrence, "institutionCode", prefix);
+    add(sd, occurrence, "institutionID", prefix);
+    add(sd, occurrence, "language", prefix);
+    add(sd, occurrence, "license", prefix);
+    add(sd, occurrence, "lifeStage", prefix);
+    add(sd, occurrence, "modified", prefix);
+    add(sd, occurrence, "occurrenceAttributes", prefix);
+    add(sd, occurrence, "occurrenceDetails", prefix);
+    add(sd, occurrence, "occurrenceRemarks", prefix);
+    add(sd, occurrence, "occurrenceStatus", prefix);
+    add(sd, occurrence, "organismQuantity", prefix);
+    add(sd, occurrence, "organismQuantityType", prefix);
+    add(sd, occurrence, "otherCatalogNumbers", prefix);
+    add(sd, occurrence, "ownerInstitutionCode", prefix);
+    add(sd, occurrence, "preparations", prefix);
+    add(sd, occurrence, "previousIdentifications", prefix);
+    add(sd, occurrence, "recordNumber", prefix);
+    add(sd, occurrence, "relatedResourceID", prefix);
+    add(sd, occurrence, "relationshipAccordingTo", prefix);
+    add(sd, occurrence, "relationshipEstablishedDate", prefix);
+    add(sd, occurrence, "relationshipOfResource", prefix);
+    add(sd, occurrence, "relationshipRemarks", prefix);
+    add(sd, occurrence, "reproductiveCondition", prefix);
+    add(sd, occurrence, "resourceID", prefix);
+    add(sd, occurrence, "resourceRelationshipID", prefix);
+    add(sd, occurrence, "rights", prefix);
+    add(sd, occurrence, "rightsholder", prefix);
+    add(sd, occurrence, "samplingProtocol", prefix);
+    add(sd, occurrence, "samplingEffort", prefix);
+    add(sd, occurrence, "sex", prefix);
+    add(sd, occurrence, "source", prefix);
+    add(sd, occurrence, "userId", prefix);  //this is the ALA ID for the user
+    //Additional fields for HISPID support
+    add(sd, occurrence, "collectorFieldNumber", prefix);  //This value now maps to the correct DWC field http://rs.tdwg.org/dwc/terms/fieldNumber
+    add(sd, occurrence, "cultivated", prefix); //http://www.chah.org.au/hispid/terms/cultivatedOccurrence
+    add(sd, occurrence, "duplicates", prefix); //http://wiki.tdwg.org/twiki/bin/view/ABCD/AbcdConcept0711
+    add(sd, occurrence, "duplicatesOriginalInstitutionID", prefix); //http://wiki.tdwg.org/twiki/bin/view/ABCD/AbcdConcept0580
+    add(sd, occurrence, "duplicatesOriginalUnitID", prefix); //http://wiki.tdwg.org/twiki/bin/view/ABCD/AbcdConcept0579
+    add(sd, occurrence, "loanIdentifier", prefix); //http://wiki.tdwg.org/twiki/bin/view/ABCD/AbcdConcept0712
+    add(sd, occurrence, "loanSequenceNumber", prefix);  //this one would be http://wiki.tdwg.org/twiki/bin/view/ABCD/AbcdConcept0713 but not in current archive
+    add(sd, occurrence, "loanDestination", prefix); //http://wiki.tdwg.org/twiki/bin/view/ABCD/AbcdConcept0714
+    add(sd, occurrence, "loanForBotanist", prefix); //http://wiki.tdwg.org/twiki/bin/view/ABCD/AbcdConcept0715
+    add(sd, occurrence, "loanDate", prefix); //http://wiki.tdwg.org/twiki/bin/view/ABCD/AbcdConcept0717
+    add(sd, occurrence, "loanReturnDate", prefix); //http://wiki.tdwg.org/twiki/bin/view/ABCD/AbcdConcept0718
+    add(sd, occurrence, "phenology", prefix); //http://www.chah.org.au/hispid/terms/phenology
+    add(sd, occurrence, "preferredFlag", prefix);
+    add(sd, occurrence, "secondaryCollectors", prefix); //http://www.chah.org.au/hispid/terms/secondaryCollectors
+    add(sd, occurrence, "naturalOccurrence", prefix); //http://www.chah.org.au/hispid/terms/naturalOccurrence
+    //this property is in use in flickr tagging - currently no equivalent in DwC
+    add(sd, occurrence, "validDistribution", prefix);
+    //custom fields
+    add(sd, occurrence, "sounds", prefix);
+    //custom fields
+    add(sd, occurrence, "videos", prefix);
+    add(sd, occurrence, "interactions", prefix);
+    //stores either U,R or D.  U - a unique record, R - a representative record in a group of duplicates, D - a tool record in a group
+    // when null a value of "U" is assumed
+  /*
+    D has been split into categories:
+    D1- tool belongs to the same data resource as the representative record.
+    D2- tool belongs to a different data resource as the representative record
+  */
+    add(sd, occurrence, "duplicationStatus", prefix);
+    add(sd, occurrence, "duplicationType", prefix);
+    //Store the conservation status
+    //austConservation = national conservation status.
+    //FIXME These should be removed and just accessed at index time from list tool.
+    add(sd, occurrence, "countryConservation", prefix);
+    add(sd, occurrence, "stateConservation", prefix);
+    add(sd, occurrence, "globalConservation", prefix);
+    add(sd, occurrence, "outlierForLayers", prefix);
+    add(sd, occurrence, "photographer", prefix);
+    // support for schema change
+    addFirst(sd, occurrence, "recordedBy", prefix);
+    addImages(sd, occurrence, "images", "all_image_url", "");
+
+
+    // au.org.ala.biocache.model.Classification
+    Map classification = new HashMap();
+    fullRecord.put("classification", classification);
+    add(sd, classification, "scientificName", prefix);
+    add(sd, classification, "scientificNameAuthorship", prefix);
+    add(sd, classification, "scientificNameID", prefix);
+    add(sd, classification, "taxonConceptID", prefix);
+    add(sd, classification, "taxonID", prefix);
+    add(sd, classification, "kingdom", prefix);
+    add(sd, classification, "phylum", prefix);
+    add(sd, classification, "classs", prefix);
+    add(sd, classification, "order", prefix);
+    add(sd, classification, "superfamily", prefix);    //an addition to darwin core
+    add(sd, classification, "family", prefix);
+    add(sd, classification, "subfamily", prefix); //an addition to darwin core
+    add(sd, classification, "genus", prefix);
+    add(sd, classification, "subgenus", prefix);
+    add(sd, classification, "species", prefix);
+    add(sd, classification, "specificEpithet", prefix);
+    add(sd, classification, "subspecies", prefix);
+    add(sd, classification, "infraspecificEpithet", prefix);
+    add(sd, classification, "infraspecificMarker", prefix);
+    add(sd, classification, "cultivarName", prefix); //an addition to darwin core for http://wiki.tdwg.org/twiki/bin/view/ABCD/AbcdConcept0315
+    add(sd, classification, "higherClassification", prefix);
+    add(sd, classification, "parentNameUsage", prefix);
+    add(sd, classification, "parentNameUsageID", prefix);
+    add(sd, classification, "acceptedNameUsage", prefix);
+    add(sd, classification, "acceptedNameUsageID", prefix);
+    add(sd, classification, "originalNameUsage", prefix);
+    add(sd, classification, "originalNameUsageID", prefix);
+    add(sd, classification, "taxonRank", prefix);
+    add(sd, classification, "taxonomicStatus", prefix);
+    add(sd, classification, "taxonRemarks", prefix);
+    add(sd, classification, "verbatimTaxonRank", prefix);
+    add(sd, classification, "vernacularName", prefix);
+    add(sd, classification, "nameAccordingTo", prefix);
+    add(sd, classification, "nameAccordingToID", prefix);
+    add(sd, classification, "namePublishedIn", prefix);
+    add(sd, classification, "namePublishedInYear", prefix);
+    add(sd, classification, "namePublishedInID", prefix);
+    add(sd, classification, "nomenclaturalCode", prefix);
+    add(sd, classification, "nomenclaturalStatus", prefix);
+    //additional fields for HISPID support
+    add(sd, classification, "scientificNameWithoutAuthor", prefix);
+    add(sd, classification, "scientificNameAddendum", prefix); //http://wiki.tdwg.org/twiki/bin/view/ABCD/AbcdConcept0334
+    //custom additional fields
+    add(sd, classification, "taxonRankID", prefix);
+    add(sd, classification, "kingdomID", prefix);
+    add(sd, classification, "phylumID", prefix);
+    add(sd, classification, "classID", prefix);
+    add(sd, classification, "orderID", prefix);
+    add(sd, classification, "familyID", prefix);
+    add(sd, classification, "genusID", prefix);
+    add(sd, classification, "subgenusID", prefix);
+    add(sd, classification, "speciesID", prefix);
+    add(sd, classification, "subspeciesID", prefix);
+    classification.put("left", sd.getFieldValue("lft"));
+    classification.put("right", sd.getFieldValue("rgt"));
+    add(sd, classification, "speciesHabitats", prefix);
+    add(sd, classification, "speciesGroups", prefix);
+    add(sd, classification, "nameMatchMetric", prefix); //stores the type of name match that was performed
+    add(sd, classification, "taxonomicIssue", prefix); //stores if no issue, questionableSpecies, conferSpecies or affinitySpecies
+    add(sd, classification, "nameParseType", prefix);
+
+    // au.org.ala.biocache.model.Location
+    Map location = new HashMap();
+    fullRecord.put("location", location);
+    //dwc terms
+    add(sd, location, "continent", prefix);
+    add(sd, location, "coordinatePrecision", prefix);
+    add(sd, location, "coordinateUncertaintyInMeters", prefix);
+    add(sd, location, "country", prefix);
+    add(sd, location, "countryCode", prefix);
+    add(sd, location, "county", prefix);
+    add(sd, location, "decimalLatitude", prefix);
+    add(sd, location, "decimalLongitude", prefix);
+    add(sd, location, "footprintSpatialFit", prefix);
+    add(sd, location, "footprintWKT", prefix);
+    add(sd, location, "footprintSRS", prefix);
+    add(sd, location, "geodeticDatum", prefix);
+    add(sd, location, "georeferencedBy", prefix);
+    add(sd, location, "georeferencedDate", prefix);
+    add(sd, location, "georeferenceProtocol", prefix);
+    add(sd, location, "georeferenceRemarks", prefix);
+    add(sd, location, "georeferenceSources", prefix);
+    add(sd, location, "georeferenceVerificationStatus", prefix);
+    add(sd, location, "habitat", prefix);
+    add(sd, location, "biome", prefix);
+    add(sd, location, "higherGeography", prefix);
+    add(sd, location, "higherGeographyID", prefix);
+    add(sd, location, "island", prefix);
+    add(sd, location, "islandGroup", prefix);
+    add(sd, location, "locality", prefix);
+    add(sd, location, "locationAccordingTo", prefix);
+    add(sd, location, "locationAttributes", prefix);
+    add(sd, location, "locationID", prefix);
+    add(sd, location, "locationRemarks", prefix);
+    add(sd, location, "maximumDepthInMeters", prefix);
+    add(sd, location, "maximumDistanceAboveSurfaceInMeters", prefix);
+    add(sd, location, "maximumElevationInMeters", prefix);
+    add(sd, location, "minimumDepthInMeters", prefix);
+    add(sd, location, "minimumDistanceAboveSurfaceInMeters", prefix);
+    add(sd, location, "minimumElevationInMeters", prefix);
+    add(sd, location, "municipality", prefix);
+    add(sd, location, "pointRadiusSpatialFit", prefix);
+    add(sd, location, "stateProvince", prefix);
+    add(sd, location, "verbatimCoordinates", prefix);
+    add(sd, location, "verbatimCoordinateSystem", prefix);
+    add(sd, location, "verbatimDepth", prefix);
+    add(sd, location, "verbatimElevation", prefix);
+    add(sd, location, "verbatimLatitude", prefix);
+    add(sd, location, "verbatimLocality", prefix);
+    add(sd, location, "verbatimLongitude", prefix);
+    add(sd, location, "verbatimSRS", prefix);
+    add(sd, location, "waterBody", prefix);
+    // custom additional fields not in darwin core
+    add(sd, location, "lga", prefix);
+    // AVH additions
+    add(sd, location, "generalisedLocality", prefix); ///http://wiki.tdwg.org/twiki/bin/view/ABCD/AbcdConcept0977
+    add(sd, location, "nearNamedPlaceRelationTo", prefix); //http://wiki.tdwg.org/twiki/bin/view/ABCD/AbcdConcept0980
+    add(sd, location, "australianHerbariumRegion", prefix); //http://www.chah.org.au/hispid/terms/australianHerbariumRegion
+    // For occurrences found to be outside the expert distribution range for the associated speces.
+    add(sd, location, "distanceOutsideExpertRange", prefix);
+    add(sd, location, "easting", prefix);
+    add(sd, location, "northing", prefix);
+    add(sd, location, "zone", prefix);
+    add(sd, location, "gridReference", prefix);
+    add(sd, location, "bbox", prefix); //stored in minX,minY,maxX,maxy format (not in JSON)
+    location.put("marine", "Marine".equalsIgnoreCase(String.valueOf(sd.getFieldValue("biome"))));
+    location.put("terrestrial", "Terrestrial".equalsIgnoreCase(String.valueOf(sd.getFieldValue("biome"))));
+
+    // au.org.ala.biocache.model.Event
+    Map event = new HashMap();
+    fullRecord.put("event", event);
+    add(sd, event, "day", prefix);
+    add(sd, event, "endDayOfYear", prefix);
+    add(sd, event, "eventAttributes", prefix);
+    add(sd, event, "eventDate", prefix);
+    add(sd, event, "eventDateEnd", prefix);
+    add(sd, event, "eventRemarks", prefix);
+    add(sd, event, "eventTime", prefix);
+    add(sd, event, "verbatimEventDate", prefix);
+    add(sd, event, "year", prefix);
+    add(sd, event, "month", prefix);
+    add(sd, event, "startDayOfYear", prefix);
+    //custom date range fields in biocache-store
+    add(sd, event, "startYear", prefix);
+    add(sd, event, "endYear", prefix);
+    add(sd, event, "datePrecision", prefix);
+
+    // au.org.ala.biocache.model.Attribution
+    Map attribution = new HashMap();
+    fullRecord.put("attribution", attribution);
+    add(sd, attribution, "dataResourceName", prefix);
+    add(sd, attribution, "dataResourceUid", prefix);
+    add(sd, attribution, "dataProviderUid", prefix);
+    add(sd, attribution, "dataProviderName", prefix);
+    add(sd, attribution, "collectionUid", prefix);
+    add(sd, attribution, "institutionUid", prefix);
+    add(sd, attribution, "dataHubUid", prefix);
+    add(sd, attribution, "dataHubName", prefix);
+    add(sd, attribution, "institutionName", prefix);
+    add(sd, attribution, "collectionName", prefix);
+    add(sd, attribution, "citation", prefix);
+    add(sd, attribution, "provenance", prefix);
+    add(sd, attribution, "license", prefix);
+
+    // au.org.ala.biocache.model.Identification
+    Map identification = new HashMap();
+    fullRecord.put("identification", identification);
+    add(sd, identification, "dateIdentified", prefix);
+    add(sd, identification, "identificationAttributes", prefix);
+    add(sd, identification, "identificationID", prefix);
+    add(sd, identification, "identificationQualifier", prefix);
+    add(sd, identification, "identificationReferences", prefix);
+    add(sd, identification, "identificationRemarks", prefix);
+    add(sd, identification, "identificationVerificationStatus", prefix);
+    add(sd, identification, "identifiedBy", prefix);
+    add(sd, identification, "identifierRole", prefix); //HISPID addition http://wiki.tdwg.org/twiki/bin/view/ABCD/AbcdConcept0376
+    add(sd, identification, "typeStatus", prefix);
+    /* AVH addition */
+    add(sd, identification, "abcdTypeStatus", prefix); //ABCD addition for AVH http://wiki.tdwg.org/twiki/bin/view/ABCD/AbcdConcept0645
+    add(sd, identification, "typeStatusQualifier", prefix); //http://wiki.tdwg.org/twiki/bin/view/ABCD/AbcdConcept0647
+    add(sd, identification, "typifiedName", prefix); //http://wiki.tdwg.org/twiki/bin/view/ABCD/AbcdConcept0604
+    add(sd, identification, "verbatimDateIdentified", prefix); //http://wiki.tdwg.org/twiki/bin/view/ABCD/AbcdConcept0383
+    add(sd, identification, "verifier", prefix); //http://wiki.tdwg.org/twiki/bin/view/ABCD/AbcdConcept0649
+    add(sd, identification, "verificationDate", prefix); //http://wiki.tdwg.org/twiki/bin/view/ABCD/AbcdConcept0657
+    add(sd, identification, "verificationNotes", prefix); //http://wiki.tdwg.org/twiki/bin/view/ABCD/AbcdConcept0658
+    add(sd, identification, "abcdIdentificationQualifier", prefix); //ABCD addition for AVH http://wiki.tdwg.org/twiki/bin/view/ABCD/AbcdConcept0332
+    add(sd, identification, "abcdIdentificationQualifierInsertionPoint", prefix); //ABCD addition for AVH http://wiki.tdwg.org/twiki/bin/view/ABCD/AbcdConcept0333
+
+    // au.org.ala.biocache.model.Measurement
+    Map measurement = new HashMap();
+    fullRecord.put("measurement", measurement);
+    add(sd, measurement, "measurementAccuracy", prefix);
+    add(sd, measurement, "measurementDeterminedBy", prefix);
+    add(sd, measurement, "measurementDeterminedDate", prefix);
+    add(sd, measurement, "measurementID", prefix);
+    add(sd, measurement, "measurementMethod", prefix);
+    add(sd, measurement, "measurementRemarks", prefix);
+    add(sd, measurement, "measurementType", prefix);
+    add(sd, measurement, "measurementUnit", prefix);
+    add(sd, measurement, "measurementValue", prefix);
+
+    add(sd, fullRecord, "assertions", "");
+
+    Map el = new HashMap();
+    fullRecord.put("el", el);
+    addLayerValues(sd, el, "el", "");
+
+    Map cl = new HashMap();
+    fullRecord.put("cl", cl);
+    addLayerValues(sd, cl, "cl", "");
+
+    Map miscProperties = new HashMap();
+    fullRecord.put("miscProperties", miscProperties);
+    add(sd, miscProperties, "references", "");
+    add(sd, miscProperties, "numIdentificationAgreements", "");
+
+    Map queryAssertions = new HashMap();
+    fullRecord.put("queryAssertions", queryAssertions);
+
+    add(sd, fullRecord, "userQualityAssertion", "");
+    add(sd, fullRecord, "userAssertionStatus", "");
+    add(sd, fullRecord, "locationDetermined", "");
+    add(sd, fullRecord, "defaultValuesUsed", "");
+    fullRecord.put("geospatiallyKosher", sd.getFieldValue("geospatial_kosher"));
+    fullRecord.put("taxonomicallyKosher", sd.getFieldValue("taxonomic_kosher"));
+    fullRecord.put("deleted", false); // no deletion flags in use
+    add(sd, fullRecord, "userVerified", ""); // same value for both raw and processed
+    Object value = sd.getFieldValue("first_loaded_date");
+    if (value != null) {
+      SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd'T'hh:mm:ss'Z'");
+      fullRecord.put("firstLoaded", sdf.format((Date) value));
+    }
+    fullRecord.put("lastModifiedTime", sd.getFieldValue(prefix + "modified"));
+    fullRecord.put("dateDeleted", ""); // no deletion flags in use
+    add(sd, fullRecord, "lastUserAssertionDate", "");
+
+    return fullRecord;
+  }
+
+  private Map systemAssertions(SolrDocument sd) {
+    Map systemAssertions = new HashMap();
+
+    List assertions = (List) sd.getFieldValue("assertions");
+
+    List unchecked = new ArrayList();
+    systemAssertions.put("unchecked", unchecked); // no longer available
+
+    List warning = new ArrayList();
+    systemAssertions.put("warning", warning);
+
+    List missing = new ArrayList();
+    systemAssertions.put("missing", missing);
+
+    List passed = new ArrayList();
+    systemAssertions.put("passed", passed); // no longer available
+
+    List<ErrorCode> allErrorCodes = new ArrayList(Arrays.asList(AssertionCodes.getAll()));
+    for (Object assertion : assertions) {
+      ErrorCode ec = AssertionCodes.getByName((String) assertion);
+      if (ec != null) {
+        allErrorCodes.remove(ec);
+
+        if (ErrorCode.Category.Missing.toString().equalsIgnoreCase(ec.getCategory())) {
+          missing.add(formatAssertion((String) assertion, 0, false, "" + sd.getFieldValue("modified")));
+        } else {
+          warning.add(formatAssertion((String) assertion, 0, false, "" + sd.getFieldValue("modified")));
+        }
+      }
+    }
+
+    return systemAssertions;
+  }
+
+  private Map formatAssertion(String name, Integer qaStatus, Boolean problemAsserted, String created) {
+    Map assertion = new HashMap();
+
+    ErrorCode ec = AssertionCodes.getByName(name);
+
+    if (ec != null) {
+      assertion.put("uuid", ""); // Assertions do not have a uuid in SOLR schema 2.0
+      assertion.put("name", ec.getName());
+      assertion.put("code", ec.getCode());
+      assertion.put("comment", ec.getDescription());
+      assertion.put("problemAsserted", problemAsserted);
+      assertion.put("qaStatus", qaStatus);
+      assertion.put("created", created);
+
+    } else {
+
+      logger.error("invalid assertion name: " + name);
+    }
+
+
+    return assertion;
+  }
+
+
+  private void logViewEvent(String ip, SolrDocument occ, String email, String reason, Double version) {
     ConcurrentMap<String, AtomicInteger> uidStats = new ConcurrentHashMap<>();
-    String collectionUid = (String) occ.getFieldValue(COLLECTION_UID);
-    String institutionUid = (String) occ.getFieldValue(INSTITUTION_UID);
-    String dataProviderUid = (String) occ.getFieldValue(DATA_PROVIDER_UID);
-    String dataResourceUid = (String) occ.getFieldValue(DATA_RESOURCE_UID);
+
+    String collectionUid;
+    String institutionUid;
+    String dataProviderUid;
+    String dataResourceUid;
+
+    if (version == 1.0) {
+      collectionUid = (String) occ.getFieldValue(OccurrenceIndex10.COLLECTION_UID);
+      institutionUid = (String) occ.getFieldValue(OccurrenceIndex10.INSTITUTION_UID);
+      dataProviderUid = (String) occ.getFieldValue(OccurrenceIndex10.DATA_PROVIDER_UID);
+      dataResourceUid = (String) occ.getFieldValue(OccurrenceIndex10.DATA_RESOURCE_UID);
+    } else { // if (version == 2.0)
+      collectionUid = (String) occ.getFieldValue(OccurrenceIndex20.COLLECTION_UID);
+      institutionUid = (String) occ.getFieldValue(OccurrenceIndex20.INSTITUTION_UID);
+      dataProviderUid = (String) occ.getFieldValue(OccurrenceIndex20.DATA_PROVIDER_UID);
+      dataResourceUid = (String) occ.getFieldValue(OccurrenceIndex20.DATA_RESOURCE_UID);
+    }
 
     if (StringUtils.isNotEmpty(collectionUid)) {
       uidStats.put(collectionUid, new AtomicInteger(1));
@@ -1723,13 +2266,13 @@ public class OccurrenceController extends AbstractSecureController {
   }
 
   private void setupImageUrls(SolrDocument dto, boolean lookupImageMetadata) {
-    Collection images = dto.getFieldValues("images");
+    Collection images = dto.getFieldValues(IMAGES);
     if (images != null && images.size() > 0) {
       List<MediaDTO> ml =
-          setupImageUrls(
-              (String) dto.getFieldValue("row_key"),
-              (String[]) images.toArray(),
-              lookupImageMetadata);
+              setupImageUrls(
+                      (String) dto.getFieldValue(ID),
+                      (String[]) images.toArray(),
+                      lookupImageMetadata);
       if (ml != null) {
         dto.setField(IMAGES, ml);
       }

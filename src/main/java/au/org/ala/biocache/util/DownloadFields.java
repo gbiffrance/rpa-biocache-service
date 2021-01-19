@@ -152,7 +152,7 @@ public class DownloadFields {
      * @param fieldNames
      * @return
      */
-    public List<String>[] getIndexFields(String[] fieldNames, boolean dwcHeaders, String layersServiceUrl){
+    public List<String>[] getIndexFields(String[] fieldNames, boolean dwcHeaders, String layersServiceUrl, Double version) {
         updateLayerNames();
 
         java.util.List<String> mappedNames = new java.util.LinkedList<String>();
@@ -198,10 +198,10 @@ public class DownloadFields {
                 // indexName is a valid layer at layersServiceUrl
                 analysisLayers.add(indexName);
                 analysisHeaders.add(layersService.findAnalysisLayerName(indexName, layersServiceUrl));
-            } else if (field == null && listsService.getKvp(indexName) != null) {
+            } else if (field == null && listsService.getKvp(indexName, version) != null) {
                 // indexName is a valid species list at the listsService
-                listHeaders.addAll(listsService.getKvpNames(indexName, listsService.getKvp(indexName)));
-                listFields.addAll(listsService.getKvpFields(indexName, listsService.getKvp(indexName)));
+                listHeaders.addAll(listsService.getKvpNames(indexName, listsService.getKvp(indexName, version)));
+                listFields.addAll(listsService.getKvpFields(indexName, listsService.getKvp(indexName, version)));
             } else {
                 unmappedNames.add(indexName);
             }

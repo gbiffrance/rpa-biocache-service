@@ -19,13 +19,12 @@ import au.org.ala.biocache.dao.SearchDAO;
 import au.org.ala.biocache.dto.SpatialSearchRequestParams;
 import org.apache.solr.common.SolrDocument;
 import org.apache.solr.common.SolrDocumentList;
-import org.gbif.utils.file.csv.CSVReader;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import javax.inject.Inject;
-import java.io.IOException;
-import java.util.*;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.regex.Pattern;
 
 @Component("OccurrenceUtils")
@@ -118,38 +117,6 @@ public class OccurrenceUtils {
 //        assertions.put("passed", passed);
 //        occ.setSystemAssertions(assertions);
         return sd;
-    }
-
-    /**
-     * @return
-     */
-    private Map<String, String> rawToProcessedMapping = null;
-    public Map<String, String> getRawToProcessedMapping() throws IOException {
-        if (rawToProcessedMapping == null) {
-            Map<String, String> mapping = new HashMap();
-
-            CSVReader reader = new CSVReader(DwCTerms.class.getResourceAsStream("/fieldsRawAndProcessed.csv"),
-                    "UTF-8", ",", '\"', 1);
-
-            while(reader.hasNext()) {
-                String [] line = reader.next();
-
-                String key = "";
-                String value = "";
-                if (line.length > 0) {
-                    key = line[0];
-                }
-                if (line.length > 1) {
-                    value = line[1];
-                }
-
-                mapping.put(key, value);
-            }
-
-            rawToProcessedMapping = mapping;
-        }
-
-        return rawToProcessedMapping;
     }
 
     @Value("${media.store.url:}")

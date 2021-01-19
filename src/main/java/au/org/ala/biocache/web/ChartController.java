@@ -429,7 +429,8 @@ public class ChartController extends AbstractSecureController implements Seriali
 
     private boolean isDate(String field) throws Exception {
         for (IndexFieldDTO f : indexDao.getIndexedFields()) {
-            if (f.getName().equalsIgnoreCase(field) && f.getDataType().equalsIgnoreCase("tdate")) return true;
+            if (f.getName().equalsIgnoreCase(field) && (f.getDataType().equalsIgnoreCase("tdate") || f.getDataType().equalsIgnoreCase("date")))
+                return true;
         }
         return false;
     }

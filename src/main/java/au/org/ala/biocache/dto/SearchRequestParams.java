@@ -41,18 +41,18 @@ public class SearchRequestParams {
 
     /**
      * Request parameters version.
-     *
-     * version 1.0 (version==null || version==1.0)
-     *  - biocache-store SOLR schema fields in requests are compatible with pipeline SOLR schema.
+     * <p>
+     * version 1.0
+     * - biocache-store SOLR schema fields in requests are compatible with pipeline SOLR schema.
      * version 2.0
-     *  - No pipeline field substitutions.
+     * - No pipeline field substitutions.
      */
-    protected Double version = null;
+    protected Double version = 1.0;
 
     /**
      * When the default OccurrenceIndex mapped SOLR fields are stored=false and docValues=true fl must include them
      */
-    protected String fl = OccurrenceIndex.defaultFields;
+    protected String fl = OccurrenceIndex10.defaultFields;
 
     /**
      * The facets to be included by the search
@@ -472,7 +472,12 @@ public class SearchRequestParams {
     }
 
     public void setVersion(Double version) {
-	    this.version = version;
+        this.version = version;
+        if (2.0 == version) {
+            fl = OccurrenceIndex20.defaultFields;
+        } else if (1.0 == version) {
+            fl = OccurrenceIndex10.defaultFields;
+        }
     }
 
   /* (non-Javadoc)

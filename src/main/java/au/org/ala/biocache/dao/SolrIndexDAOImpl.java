@@ -265,7 +265,7 @@ public class SolrIndexDAOImpl implements IndexDAO {
           logger.debug("SOLR query:" + query.toString());
         }
 
-        if (legacyFieldNameSupport && version == null || version == 1.0) {
+        if (legacyFieldNameSupport && version == 1.0) {
           Pair<SolrParams, Map<String, String>> pair = toLegacyQuery(query);
           query = pair.first();
 
@@ -437,7 +437,7 @@ public class SolrIndexDAOImpl implements IndexDAO {
       Map.Entry<String, String[]> entity = it.next();
 
       Pattern q = Pattern.compile("\\b([^:]*):");
-      Pattern f = Pattern.compile("\\b(.*)\\b");
+      Pattern f = Pattern.compile("\\b(.+?)\\b");
 
       if (entity.getValue() != null) {
         String[] values = entity.getValue();
@@ -504,7 +504,7 @@ public class SolrIndexDAOImpl implements IndexDAO {
 
     String[] fieldsStr = str.split("fields=\\{");
 
-    Map<String, String> indexToJsonMap = new OccurrenceIndex().indexToJsonMap();
+    Map<String, String> indexToJsonMap = new OccurrenceIndex20().indexToJsonMap();
 
     for (String fieldStr : fieldsStr) {
       if (fieldStr != null && !"".equals(fieldStr)) {

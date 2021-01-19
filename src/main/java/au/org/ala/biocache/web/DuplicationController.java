@@ -18,8 +18,6 @@ import au.org.ala.biocache.dao.IndexDAO;
 import au.org.ala.biocache.dao.SearchDAO;
 import au.org.ala.biocache.dto.DuplicateRecordDetails;
 import au.org.ala.biocache.dto.SpatialSearchRequestParams;
-import au.org.ala.biocache.util.OccurrenceUtils;
-import au.org.ala.biocache.util.QueryFormatUtils;
 import au.org.ala.biocache.util.SearchUtils;
 import org.apache.commons.lang.StringUtils;
 import org.apache.log4j.Logger;
@@ -33,9 +31,11 @@ import org.springframework.web.bind.annotation.ResponseBody;
 
 import javax.inject.Inject;
 import javax.servlet.http.HttpServletRequest;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 
-import static au.org.ala.biocache.dto.DuplicateRecordDetails.*;
+import static au.org.ala.biocache.dto.OccurrenceIndex.*;
 
 @Controller
 public class DuplicationController {
@@ -85,6 +85,7 @@ public class DuplicationController {
 
     private SolrDocumentList searchDuplicates(String field, String value) throws Exception {
         SpatialSearchRequestParams query = new SpatialSearchRequestParams();
+        query.setVersion(2.0);
         query.setFacet(false);
         query.setQ(field + ":" + value);
         query.setFl(StringUtils.join(new String[] {ID, DUPLICATE_OF, DUPLICATE_REASONS, DUPLICATE_STATUS}));
@@ -95,6 +96,7 @@ public class DuplicationController {
     public @ResponseBody Map<String, FieldStatsInfo> printStats(HttpServletRequest request) throws Exception {
         String guid = searchUtils.getGuidFromPath(request);
         SpatialSearchRequestParams searchParams = new SpatialSearchRequestParams();
+        searchParams.setVersion(2.0);
         searchParams.setQ("*:*");
         searchParams.setFacets(new String[]{guid});
         return indexDao.getStatistics(searchParams);

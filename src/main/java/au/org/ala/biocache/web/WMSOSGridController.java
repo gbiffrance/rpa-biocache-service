@@ -4,7 +4,6 @@ import au.org.ala.biocache.dao.IndexDAO;
 import au.org.ala.biocache.dao.SearchDAO;
 import au.org.ala.biocache.dto.*;
 import au.org.ala.biocache.util.*;
-import org.apache.commons.lang3.ArrayUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.log4j.Logger;
 import org.geotools.geometry.GeneralDirectPosition;
@@ -27,8 +26,8 @@ import javax.servlet.http.HttpServletResponse;
 import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.text.MessageFormat;
-import java.util.*;
 import java.util.List;
+import java.util.*;
 
 /**
  * WMS controller that supports OS grid rendering.
@@ -363,21 +362,25 @@ public class WMSOSGridController {
             }
         }
 
-        double oneUnitInRequestedProjXInPixels = (double) width / (double)(maxx - minx);
-        double oneUnitInRequestedProjYInPixels = (double) height / (double)(maxy - miny);
+        double oneUnitInRequestedProjXInPixels = (double) width / (double) (maxx - minx);
+        double oneUnitInRequestedProjYInPixels = (double) height / (double) (maxy - miny);
 
         //get a bounding box in WGS84 decimal latitude/longitude
         double[] minLatLng = convertProjectionToWGS84(minx, miny, srs);
         double[] maxLatLng = convertProjectionToWGS84(maxx, maxy, srs);
 
-        String bboxFilterQuery = "(longitude:[{0} TO {2}] AND latitude:[{1} TO {3}])";
+        String longitudeField = requestParams.getVersion() == 1.0 ? OccurrenceIndex10.LONGITUDE : OccurrenceIndex20.LONGITUDE;
+        String latitudeField = requestParams.getVersion() == 1.0 ? OccurrenceIndex10.LATITUDE : OccurrenceIndex20.LATITUDE;
+
+
+        String bboxFilterQuery = "({4}:[{0} TO {2}] AND {5}:[{1} TO {3}])";
 
         double minX = minLatLng[1] - buff;
         double maxX = maxLatLng[1] + buff;
         double minY = minLatLng[0] - buff;
         double maxY = maxLatLng[0] + buff;
 
-        if(minX > maxX){
+        if (minX > maxX) {
             double tmp = maxX;
             maxX = minX;
             minX = tmp;
@@ -389,7 +392,7 @@ public class WMSOSGridController {
             minY = tmp;
         }
 
-        String fq = MessageFormat.format(bboxFilterQuery, minX, minY, maxX, maxY);
+        String fq = MessageFormat.format(bboxFilterQuery, minX, minY, maxX, maxY, longitudeField, latitudeField);
         String[] fqs = wmsUtils.getFq(requestParams);
         if(fqs ==null || fqs.length==1 && StringUtils.isBlank(fqs[0])){
             fqs = new String[0];

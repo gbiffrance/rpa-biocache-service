@@ -19,11 +19,8 @@ import au.com.bytecode.opencsv.CSVWriter;
 import au.org.ala.biocache.dao.IndexDAO;
 import au.org.ala.biocache.dao.PersistentQueueDAO;
 import au.org.ala.biocache.dao.SearchDAO;
-import au.org.ala.biocache.dto.DownloadDetailsDTO;
+import au.org.ala.biocache.dto.*;
 import au.org.ala.biocache.dto.DownloadDetailsDTO.DownloadType;
-import au.org.ala.biocache.dto.DownloadDoiDTO;
-import au.org.ala.biocache.dto.DownloadRequestParams;
-import au.org.ala.biocache.dto.IndexFieldDTO;
 import au.org.ala.biocache.stream.OptionalZipOutputStream;
 import au.org.ala.biocache.util.AlaFileUtils;
 import au.org.ala.biocache.util.thread.DownloadControlThread;
@@ -31,7 +28,6 @@ import au.org.ala.biocache.util.thread.DownloadCreator;
 import au.org.ala.biocache.writer.RecordWriterException;
 import au.org.ala.doi.CreateDoiResponse;
 import com.google.common.collect.Lists;
-import com.google.common.io.Files;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import org.ala.client.appender.RestLevel;
 import org.ala.client.model.LogEventVO;
@@ -221,7 +217,7 @@ public class DownloadService implements ApplicationListener<ContextClosedEvent> 
     protected String biocacheUiUrl = "https://biocache.ala.org.au";
 
     //TODO: this should be retrieved from SDS
-    @Value("${sensitiveAccessRoles:{\n" +
+    @Value("${sensitiveAccessRoles10:{\n" +
             "\n" +
             "\"ROLE_SDS_ACT\" : \"sensitive:\\\"generalised\\\" AND (cl927:\\\"Australian Captial Territory\\\" OR cl927:\\\"Jervis Bay Territory\\\") AND -(data_resource_uid:dr359 OR data_resource_uid:dr571 OR data_resource_uid:dr570)\"\n" +
             "\"ROLE_SDS_NSW\" : \"sensitive:\\\"generalised\\\" AND cl927:\\\"New South Wales (including Coastal Waters)\\\" AND -(data_resource_uid:dr359 OR data_resource_uid:dr571 OR data_resource_uid:dr570)\",\n" +
@@ -235,9 +231,28 @@ public class DownloadService implements ApplicationListener<ContextClosedEvent> 
             "\"ROLE_SDS_BIRDLIFE\" : \"sensitive:\\\"generalised\\\" AND (data_resource_uid:dr359 OR data_resource_uid:dr571 OR data_resource_uid:dr570)\"\n" +
             "\n" +
             "}}")
-    protected String sensitiveAccessRoles = "{}";;
+    protected String sensitiveAccessRoles10 = "{}";
+    ;
 
-    private JSONObject sensitiveAccessRolesToSolrFilters;
+    @Value("${sensitiveAccessRoles20:{\n" +
+            "\n" +
+            "\"ROLE_SDS_ACT\" : \"sensitive:\\\"generalised\\\" AND (cl927:\\\"Australian Captial Territory\\\" OR cl927:\\\"Jervis Bay Territory\\\") AND -(dataResourceUid:dr359 OR dataResourceUid:dr571 OR dataResourceUid:dr570)\"\n" +
+            "\"ROLE_SDS_NSW\" : \"sensitive:\\\"generalised\\\" AND cl927:\\\"New South Wales (including Coastal Waters)\\\" AND -(dataResourceUid:dr359 OR dataResourceUid:dr571 OR dataResourceUid:dr570)\",\n" +
+            "\"ROLE_SDS_NZ\" : \"sensitive:\\\"generalised\\\" AND (dataResourceUid:dr2707 OR dataResourceUid:dr812 OR dataResourceUid:dr814 OR dataResourceUid:dr808 OR dataResourceUid:dr806 OR dataResourceUid:dr815 OR dataResourceUid:dr802 OR dataResourceUid:dr805 OR dataResourceUid:dr813) AND -cl927:* AND -(dataResourceUid:dr359 OR dataResourceUid:dr571 OR dataResourceUid:dr570)\",\n" +
+            "\"ROLE_SDS_NT\" : \"sensitive:\\\"generalised\\\" AND cl927:\\\"Northern Territory (including Coastal Waters)\\\" AND -(dataResourceUid:dr359 OR dataResourceUid:dr571 OR dataResourceUid:dr570)\",\n" +
+            "\"ROLE_SDS_QLD\" : \"sensitive:\\\"generalised\\\" AND cl927:\\\"Queensland (including Coastal Waters)\\\" AND -(dataResourceUid:dr359 OR dataResourceUid:dr571 OR dataResourceUid:dr570)\",\n" +
+            "\"ROLE_SDS_SA\" : \"sensitive:\\\"generalised\\\" AND cl927:\\\"South Australia (including Coastal Waters)\\\" AND -(dataResourceUid:dr359 OR dataResourceUid:dr571 OR dataResourceUid:dr570)\",\n" +
+            "\"ROLE_SDS_TAS\" : \"sensitive:\\\"generalised\\\" AND cl927:\\\"Tasmania (including Coastal Waters)\\\" AND -(dataResourceUid:dr359 OR dataResourceUid:dr571 OR dataResourceUid:dr570)\",\n" +
+            "\"ROLE_SDS_VIC\" : \"sensitive:\\\"generalised\\\" AND cl927:\\\"Victoria (including Coastal Waters)\\\" AND -(dataResourceUid:dr359 OR dataResourceUid:dr571 OR dataResourceUid:dr570)\",\n" +
+            "\"ROLE_SDS_WA\" : \"sensitive:\\\"generalised\\\" AND cl927:\\\"Western Australia (including Coastal Waters)\\\" AND -(dataResourceUid:dr359 OR dataResourceUid:dr571 OR dataResourceUid:dr570)\",\n" +
+            "\"ROLE_SDS_BIRDLIFE\" : \"sensitive:\\\"generalised\\\" AND (dataResourceUid:dr359 OR dataResourceUid:dr571 OR dataResourceUid:dr570)\"\n" +
+            "\n" +
+            "}}")
+    protected String sensitiveAccessRoles20 = "{}";
+    ;
+
+    private JSONObject sensitiveAccessRolesToSolrFilters10;
+    private JSONObject sensitiveAccessRolesToSolrFilters20;
 
     @Value("${download.offline.max.url:https://downloads.ala.org.au}")
     public String dowloadOfflineMaxUrl = "https://downloads.ala.org.au";
@@ -298,15 +313,15 @@ public class DownloadService implements ApplicationListener<ContextClosedEvent> 
     public void init() throws ParseException {
 
         // Simple JSON initialisation, let's follow the default Spring semantics
-        sensitiveAccessRolesToSolrFilters = (JSONObject) new JSONParser().parse(sensitiveAccessRoles);
+        sensitiveAccessRolesToSolrFilters10 = (JSONObject) new JSONParser().parse(sensitiveAccessRoles10);
+        sensitiveAccessRolesToSolrFilters20 = (JSONObject) new JSONParser().parse(sensitiveAccessRoles20);
 
-        if(initialised.compareAndSet(false, true)) {
+        if (initialised.compareAndSet(false, true)) {
             //init on thread so as to not hold up other PostConstruct that this may depend on
             new Thread() {
                 @Override
                 public void run() {
-                    try
-                    {
+                    try {
                         ExecutorService nextParallelExecutor = getOfflineThreadPoolExecutor();
                         // Create the implementation for the threads running in the DownloadControlThread
                         DownloadCreator nextDownloadCreator = getNewDownloadCreator();
@@ -553,18 +568,26 @@ public class DownloadService implements ApplicationListener<ContextClosedEvent> 
         String filename = requestParams.getFile();
         String originalParams = requestParams.toString();
 
+        String assertions = OccurrenceIndex.ASSERTIONS;
+        String data_resource_uid = OccurrenceIndex20.DATA_RESOURCE_UID;
+        Double version = 2.0;
+        if (requestParams != null && requestParams.getVersion() == 1.0) {
+            version = 1.0;
+            data_resource_uid = OccurrenceIndex10.DATA_RESOURCE_UID;
+        }
+
         // Use a zip output stream to include the data and citation together in
         // the download.
         // Note: When producing a shp the output will stream a csv followed by a zip.
-        try(OptionalZipOutputStream sp = new OptionalZipOutputStream(
+        try (OptionalZipOutputStream sp = new OptionalZipOutputStream(
                 zip ? OptionalZipOutputStream.Type.zipped : OptionalZipOutputStream.Type.unzipped, new CloseShieldOutputStream(out), maxMB);) {
             String suffix = requestParams.getFileType().equals("shp") ? "csv" : requestParams.getFileType();
             sp.putNextEntry(filename + "." + suffix);
             // put the facets
             if ("all".equals(requestParams.getQa())) {
-                requestParams.setFacets(new String[] { "assertions", "data_resource_uid" });
+                requestParams.setFacets(new String[]{assertions, data_resource_uid});
             } else {
-                requestParams.setFacets(new String[] { "data_resource_uid" });
+                requestParams.setFacets(new String[]{data_resource_uid});
             }
             
             final ConcurrentMap<String, AtomicInteger> uidStats;
@@ -640,7 +663,8 @@ public class DownloadService implements ApplicationListener<ContextClosedEvent> 
                             doiDetails.setApplicationUrl(searchUrl);
                             doiDetails.setRequesterId(requesterId);
                             if (dd.getSensitiveFq() != null) {
-                                doiDetails.setAuthorisedRoles(getSensitiveRolesForUser(requesterId));
+                                doiDetails.setAuthorisedRoles(
+                                        getSensitiveRolesForUser(requesterId, dd.getRequestParams().getVersion()));
                             }
 
                             doiDetails.setRequesterName(requesterName);
@@ -1149,10 +1173,11 @@ public class DownloadService implements ApplicationListener<ContextClosedEvent> 
 
     /**
      * Generates the Solr filter to query sensitive data for the user sensitive roles
+     *
      * @param userId The user the filter is built for
      * @return A String with a Solr filter
      */
-    public String getSensitiveFq(String userId) {
+    public String getSensitiveFq(String userId, Double version) {
 
         if (downloadAuthSensitive == null || !downloadAuthSensitive) {
             return null;
@@ -1160,11 +1185,15 @@ public class DownloadService implements ApplicationListener<ContextClosedEvent> 
 
         String sensitiveFq = "";
 
-        for (String sensitiveRole : getSensitiveRolesForUser(userId)) {
+        for (String sensitiveRole : getSensitiveRolesForUser(userId, version)) {
             if (sensitiveFq.length() > 0) {
                 sensitiveFq += " OR ";
             }
-            sensitiveFq += "(" + sensitiveAccessRolesToSolrFilters.get(sensitiveRole) + ")";
+            if (version == 1.0) {
+                sensitiveFq += "(" + sensitiveAccessRolesToSolrFilters10.get(sensitiveRole) + ")";
+            } else {
+                sensitiveFq += "(" + sensitiveAccessRolesToSolrFilters20.get(sensitiveRole) + ")";
+            }
         }
 
         if (sensitiveFq.length() == 0) {
@@ -1181,13 +1210,17 @@ public class DownloadService implements ApplicationListener<ContextClosedEvent> 
 
     /**
      * List the sensitive roles for a given user
+     *
      * @param userId The user
      * @return The sensitive roles for the user, the list will be empty if the user has no sensitive roles
      */
-    public List<String> getSensitiveRolesForUser(String userId) {
+    public List<String> getSensitiveRolesForUser(String userId, Double version) {
         List<String> userRoles = authService.getUserRoles(userId);
 
-        List<String> result = new ArrayList<>(sensitiveAccessRolesToSolrFilters.keySet());
+        List<String> result = new ArrayList<>(sensitiveAccessRolesToSolrFilters10.keySet());
+        if (version != 1.0) {
+            result = new ArrayList<>(sensitiveAccessRolesToSolrFilters20.keySet());
+        }
 
         result.retainAll(userRoles);
 

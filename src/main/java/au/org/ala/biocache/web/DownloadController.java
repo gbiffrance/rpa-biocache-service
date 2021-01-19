@@ -18,7 +18,6 @@ import au.org.ala.biocache.dao.PersistentQueueDAO;
 import au.org.ala.biocache.dao.SearchDAO;
 import au.org.ala.biocache.dto.DownloadDetailsDTO;
 import au.org.ala.biocache.dto.DownloadRequestParams;
-import au.org.ala.biocache.dto.IndexFieldDTO;
 import au.org.ala.biocache.service.AuthService;
 import au.org.ala.biocache.service.DownloadService;
 import net.sf.json.JSONArray;
@@ -173,7 +172,7 @@ public class DownloadController extends AbstractSecureController {
         //get the fq that includes only the sensitive data that the userId ROLES permits
         String sensitiveFq = null;
         if (!includeSensitive) {
-            sensitiveFq = getSensitiveFq(request);
+      sensitiveFq = getSensitiveFq(request, requestParams.getVersion());
         }
 
         ip = ip == null ? request.getRemoteAddr() : ip;
@@ -405,7 +404,7 @@ public class DownloadController extends AbstractSecureController {
      * @return Null if the user does not have access to sensitive data, and a Solr query string containing the filters giving the user access to sensitive data based on their assigned role otherwise
      * @throws ParseException If the sensitiveAccessRoles configuration was not parseable
      */
-    private String getSensitiveFq(HttpServletRequest request) {
+    private String getSensitiveFq(HttpServletRequest request, Double version) {
         if (!isValidKey(request.getHeader("apiKey"))) {
             return null;
         } else {
@@ -414,7 +413,7 @@ public class DownloadController extends AbstractSecureController {
             if (xAlaUserIdHeader == null) {
                 return null;
             }
-            return downloadService.getSensitiveFq(xAlaUserIdHeader);
+            return downloadService.getSensitiveFq(xAlaUserIdHeader, version);
         }
     }
 }

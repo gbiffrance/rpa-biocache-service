@@ -1,12 +1,12 @@
 /**************************************************************************
  *  Copyright (C) 2010 Atlas of Living Australia
  *  All Rights Reserved.
- * 
+ *
  *  The contents of this file are subject to the Mozilla Public
  *  License Version 1.1 (the "License"); you may not use this file
  *  except in compliance with the License. You may obtain a copy of
  *  the License at http://www.mozilla.org/MPL/
- * 
+ *
  *  Software distributed under the License is distributed on an "AS
  *  IS" basis, WITHOUT WARRANTY OF ANY KIND, either express or
  *  implied. See the License for the specific language governing
@@ -27,140 +27,228 @@ import java.util.Map;
 
 /**
  * A DTO representing an result from the search indexes.
- * <p>
- * Version 1.0 wrapper for OccurrenceIndex
  */
-public class OccurrenceIndex10 implements OccurrenceIndex {
+public class OccurrenceIndex20 implements OccurrenceIndex {
 
-    public static final String TAXON_NAME = "taxon_name";
-    public static final String RANK = "rank";
-    public static final String SPECIESID = "species_guid";
-    public static final String LATITUDE = "latitude";
-    public static final String LONGITUDE = "longitude";
-    public static final String COORDINATE_UNCERTAINTY = "coordinate_uncertainty";
-    public static final String TAXON_CONCEPT_ID = "taxon_concept_lsid";
-    public static final String DATA_HUB_UID = "data_hub_uid";
-    public static final String GENUSID = "genus_guid";
-    public static final String DATA_PROVIDER_NAME = "data_provider";
-    public static final String OCCURRENCE_DATE = "occurrence_date";
-    public static final String LOCALITY = "locality";
-    protected static final Logger logger = Logger.getLogger(OccurrenceIndex10.class);
+    public static final String TAXON_NAME = "scientificName";
+    public static final String RAW_TAXON_NAME = "raw_scientificName";
+    public static final String RANK = "taxonRank";
+    public static final String LATITUDE = "decimalLatitude";
+    public static final String LONGITUDE = "decimalLongitude";
+    public static final String DATA_RESOURCE_NAME = "dataResourceName";
+    public static final String COORDINATE_UNCERTAINTY = "coordinateUncertaintyInMeters";
+    public static final String COMMON_NAME = "vernacularName";
+    public static final String STATE_CONSERVATION = "stateConservation";
+    public static final String RAW_STATE_CONSERVATION = "raw_stateConservation";
+    public static final String YEAR = "year";
+    public static final String BASIS_OF_RECORD = "basisOfRecord";
+    public static final String TYPE_STATUS = "typeStatus";
+    public static final String MULTIMEDIA = "multimedia";
+    public static final String COLLECTOR = "recordedBy";
+    public static final String OCCURRENCE_STATUS = "occurrenceStatus";
+    public static final String ALA_USER_ID = "alau_user_id";
+    public static final String ASSERTION_USER_ID = "assertion_user_id";
+    public static final String OUTLIER_LAYER = "outlierLayer";
+    public static final String OUTLIER_LAYER_COUNT = "outlierLayerCount";
+    public static final String TAXONOMIC_ISSUE = "taxonomicIssue";
+    public static final String FAMILYID = "familyID";
+    public static final String KINGDOMID = "kingdomID";
+    public static final String PHYLUMID = "phylumID";
+    public static final String OCCURRENCE_DATE = "eventDate";
+    protected static final Logger logger = Logger.getLogger(OccurrenceIndex20.class);
 
-    final static public String COLLECTION_UID = "collection_uid";
-    final static public String COLLECTION_NAME = "collection_name";
-    final static public String INSTITUTION_UID = "institution_uid";
-    final static public String DATA_PROVIDER_UID = "data_provider_uid";
-    final static public String DATA_RESOURCE_UID = "data_resource_uid";
-    final static public String SPECIES_HABITATS = "species_habitats";
+    public static final String TAXON_CONCEPT_ID = "taxonConceptID";
+    public static final String SUBSPECIESID = "subspeciesID";
+    public static final String SPECIESID = "speciesID";
+    public static final String GENUSID = "genusID";
+    public static final String DATA_PROVIDER_NAME = "dataProviderName";
+    public static final String DATA_HUB_UID = "dataHubUid";
+    final static public String COLLECTION_UID = "collectionUid";
+    final static public String COLLECTION_NAME = "collectionName";
+    final static public String INSTITUTION_UID = "institutionUid";
+    final static public String DATA_PROVIDER_UID = "dataProviderUid";
+    final static public String DATA_RESOURCE_UID = "dataResourceUid";
+    final static public String SPECIES_HABITATS = "speciesHabitats";
+    final public static String LOCALITY = "locality";
 
     @Field("id")
     String uuid;
-    @Field("occurrence_id")
+    @Field("raw_occurrenceID")
     String occurrenceID;
     //processed values
-    @Field("data_hub_uid")
+    @Field("dataHubUid")
     String[] dataHubUid;
-    @Field("data_hub")
+    @Field("dataHub")
     String dataHub;
-    @Field("institution_uid")
+    @Field("institutionUid")
     String institutionUid;
-    @Field("institution_code")
+    @Field("raw_institutionCode")
     String raw_institutionCode;
-    @Field("institution_name")
+    @Field("institutionName")
     String institutionName;
-    @Field("collection_uid")
+    @Field("collectionUid")
     String collectionUid;
-    @Field("collection_code")
+    @Field("raw_collectionCode")
     String raw_collectionCode;
-    @Field("collection_name")
+    @Field("collectionName")
     String collectionName;
-        @Field("catalogue_number") String raw_catalogNumber;
-        @Field("taxon_concept_lsid") String taxonConceptID;
-        @Field("occurrence_date") java.util.Date eventDate;
-        @Field("occurrence_date_end_dt") java.util.Date eventDateEnd;
-        @Field("occurrence_year") java.util.Date occurrenceYear;
-        @Field("taxon_name") String scientificName;
-        @Field("common_name") String vernacularName;
-        @Field("rank") String taxonRank;
-        @Field("rank_id") Integer taxonRankID;
-        @Field("country_code") String raw_countryCode;
-        @Field("country") String country;
-        @Field("kingdom") String kingdom;
-        @Field("phylum") String phylum;
-        @Field("class") String classs;
-        @Field("order") String order;
-        @Field("family") String family;
-        @Field("genus") String genus;
-        @Field("genus_guid") String genusGuid;
-        @Field("species") String species;
-        @Field("species_guid") String speciesGuid;
-        @Field("subspecies") String subspecies;
-        @Field("subspecies_guid") String subspeciesGuid;
-        @Field("state") String stateProvince;
-        @Field("latitude") Double decimalLatitude;
-        @Field("longitude") Double decimalLongitude;
-        @Field("coordinate_uncertainty") Double coordinateUncertaintyInMeters;
+    @Field("raw_catalogNumber")
+    String raw_catalogNumber;
+    @Field("taxonConceptID")
+    String taxonConceptID;
+    @Field("eventDateSingle")
+    Date eventDate;
+    @Field("eventDateEnd")
+    Date eventDateEnd;
+    @Field("eventDateSingle")
+    Date occurrenceYear;
+    @Field("scientificName")
+    String scientificName;
+    @Field("vernacularName")
+    String vernacularName;
+    @Field("rank")
+    String taxonRank;
+    @Field("rankID")
+    Integer taxonRankID;
+    @Field("countryCode")
+    String raw_countryCode;
+    @Field("country")
+    String country;
+    @Field("kingdom")
+    String kingdom;
+    @Field("phylum")
+    String phylum;
+    @Field("class")
+    String classs;
+    @Field("order")
+    String order;
+    @Field("family")
+    String family;
+    @Field("genus")
+    String genus;
+    @Field("genusID")
+    String genusGuid;
+    @Field("species")
+    String species;
+    @Field("speciesID")
+    String speciesGuid;
+    @Field("subspecies")
+    String subspecies;
+    @Field("subspeciesID")
+    String subspeciesGuid;
+    @Field("stateProvince")
+    String stateProvince;
+    @Field("decimalLatitude")
+    Double decimalLatitude;
+    @Field("decimalLongitude")
+    Double decimalLongitude;
+    @Field("coordinateUncertaintyInMeters")
+    Double coordinateUncertaintyInMeters;
     @Field("year")
     Integer year;
-    String month;
-    @Field("basis_of_record")
+    @Field("month")
+    Integer month;
+    @Field("basisOfRecord")
     String basisOfRecord;
-        @Field("type_status") String typeStatus;
-        @Field("location_remarks") String raw_locationRemarks;
-        @Field("occurrence_remarks") String raw_occurrenceRemarks;
-        @Field("lft") Integer left;
-        @Field("rgt") Integer right;
-        @Field("ibra") String ibra;
-        @Field("imcra") String imcra;
-        @Field("places") String lga;
-        @Field("data_provider_uid") String dataProviderUid;
-        @Field("data_provider") String dataProviderName;
-        @Field("data_resource_uid") String dataResourceUid;
-        @Field("data_resource") String dataResourceName;
-        @Field("assertions") String[] assertions;
-        @Field("user_assertions") String hasUserAssertions;
-        @Field("species_group") String[] speciesGroups;
-        @Field("image_url") String image;
+    @Field("typeStaus")
+    String typeStatus;
+    @Field("locationRemarks")
+    String raw_locationRemarks;
+    @Field("occurrenceRemarks")
+    String raw_occurrenceRemarks;
+    @Field("lft")
+    Integer left;
+    @Field("rgt")
+    Integer right;
+    @Field("ibra")
+    String ibra;
+    @Field("imcra")
+    String imcra;
+    @Field("places")
+    String lga;
+    @Field("dataProviderUid")
+    String dataProviderUid;
+    @Field("dataProviderName")
+    String dataProviderName;
+    @Field("dataResourceUid")
+    String dataResourceUid;
+    @Field("dataResourceName")
+    String dataResourceName;
+    @Field("assertions")
+    String[] assertions;
+    @Field("user_assertions")
+    String hasUserAssertions;
+    @Field("species_group")
+    String[] speciesGroups;
+    @Field("image_url")
+    String image;
     @Field("all_image_url")
     String[] images;
-    String geospatialKosherString;
+    @Field("geospatial_kosher")
+    Boolean geospatialKosher;
     @Field("taxonomic_kosher")
     String taxonomicKosher;
-    String collector;
+    @Field("recordedBy")
+    String[] collector;
     @Field("collectors")
     String[] collectors;
-        //extra raw record fields
-        @Field("raw_taxon_name") String raw_scientificName;
-        @Field("raw_basis_of_record") String raw_basisOfRecord;
-        @Field("raw_type_status") String raw_typeStatus;
-        @Field("raw_common_name") String raw_vernacularName;
-        //constructed fields
-        @Field("lat_long") String latLong;
-        @Field("point-1") String point1;
-        @Field("point-0.1") String point01;
-        @Field("point-0.01") String point001;
-        @Field("point-0.001") String point0001;
-        @Field("point-0.0001") String point00001;
-        @Field("names_and_lsid") String namesLsid;
-        @Field("multimedia") String[] multimedia;
-        @Field("license") String license;
-        @Field("identification_verification_status") String identificationVerificationStatus;
-        //conservation status field
-        @Field("aust_conservation") String austConservation;
-        @Field("state_conservation") String stateConservation;
-        @Field("sensitive") String sensitive;
-        //AVH extra fields
-        @Field("record_number") String recordNumber;
-        //For harvesting of images into the BIE
-        @Field("occurrence_details") String occurrenceDetails;
-        @Field("rights") String rights;
-        @Field("photographer_s") String photographer;
-        @Field("grid_ref") String gridReference;
-        @Field("*_s") Map<String, Object> miscStringProperties;
-        @Field("*_i") Map<String, Object> miscIntProperties;
-        @Field("*_d") Map<String, Object> miscDoubleProperties;
-        @Field("*_dt") Map<String, Object> miscDateProperties;
-
+    //extra raw record fields
+    @Field("raw_scientificName")
+    String raw_scientificName;
+    @Field("raw_basisOfRecord")
+    String raw_basisOfRecord;
+    @Field("raw_typeStatus")
+    String raw_typeStatus;
+    @Field("raw_vernacularName")
+    String raw_vernacularName;
+    //constructed fields
+    @Field("lat_long")
+    String latLong;
+    @Field("point-1")
+    String point1;
+    @Field("point-0.1")
+    String point01;
+    @Field("point-0.01")
+    String point001;
+    @Field("point-0.001")
+    String point0001;
+    @Field("point-0.0001")
+    String point00001;
+    @Field("names_and_lsid")
+    String namesLsid;
+    @Field("multimedia")
+    String[] multimedia;
+    @Field("license")
+    String license;
+    @Field("raw_identificationVerificationStatus")
+    String identificationVerificationStatus;
+    //conservation status field
+    @Field("aust_conservation")
+    String austConservation;
+    @Field("state_conservation")
+    String stateConservation;
+    @Field("sensitive")
+    String sensitive;
+    //AVH extra fields
+    @Field("raw_recordNumber")
+    String recordNumber;
+    //For harvesting of images into the BIE
+    @Field("raw_occurrenceDetails")
+    String occurrenceDetails;
+    @Field("raw_rights")
+    String rights;
+    @Field("photographer_s")
+    String photographer;
+    @Field("grid_ref")
+    String gridReference;
+    @Field("*_s")
+    Map<String, Object> miscStringProperties;
+    @Field("*_i")
+    Map<String, Object> miscIntProperties;
+    @Field("*_d")
+    Map<String, Object> miscDoubleProperties;
+    @Field("*_dt")
+    Map<String, Object> miscDateProperties;
     List<Map<String, Object>> imageMetadata;
 
     String imageUrl;
@@ -185,71 +273,72 @@ public class OccurrenceIndex10 implements OccurrenceIndex {
         this.thumbnailUrl = thumbnailUrl;
     }
 
-    public String getImageUrl(){
+    public String getImageUrl() {
         return imageUrl;
     }
-    
-    public String[] getImageUrls(){
+
+    public String[] getImageUrls() {
         return imageUrls;
     }
 
-    public String getLargeImageUrl(){
+    public String getLargeImageUrl() {
         return largeImageUrl;
     }
-    
-    public void setImageUrls(String[] urls){
+
+    public void setImageUrls(String[] urls) {
         this.imageUrls = urls;
     }
 
-    public String getSmallImageUrl(){
+    public String getSmallImageUrl() {
         return smallImageUrl;
     }
 
-    public String getThumbnailUrl(){
+    public String getThumbnailUrl() {
         return thumbnailUrl;
     }
 
-    private void addToMapIfNotNull(Map<String,String> map, String key, String value){
-        if(value != null && value != ""){
-            map.put(key,value);
+    private void addToMapIfNotNull(Map<String, String> map, String key, String value) {
+        if (value != null && value != "") {
+            map.put(key, value);
         }
     }
-    
-    private String safeDblToString(Double d){
-        if(d != null) return d.toString();
+
+    private String safeDblToString(Double d) {
+        if (d != null) return d.toString();
         return null;
     }
 
-    private String safeIntToString(Integer d){
-        if(d != null) return d.toString();
+    private String safeIntToString(Integer d) {
+        if (d != null) return d.toString();
         return null;
     }
 
-    private String arrToString(String[] arr){
-        try{
-            if(arr != null) {
+    private String arrToString(String[] arr) {
+        try {
+            if (arr != null) {
                 ObjectMapper o = new ObjectMapper();
                 return o.writeValueAsString(arr);
             }
-        }catch(Exception e){}
+        } catch (Exception e) {
+        }
         return null;
     }
 
     @JsonIgnore
-    public static String defaultFields = org.apache.commons.lang3.StringUtils.join(new OccurrenceIndex10().indexToJsonMap().keySet(), ",");
-    
+    public static String defaultFields = org.apache.commons.lang3.StringUtils.join(new OccurrenceIndex20().indexToJsonMap().keySet(), ",");
+
     @JsonIgnore
-    public Map<String,String> toMap() {
+    public Map<String, String> toMap() {
         String sdate = null;
-        if(eventDate != null) {
+        if (eventDate != null) {
             sdate = DateFormatUtils.format(eventDate, "yyyy-MM-dd");
         }
         String sdateEnd = null;
-        if(eventDateEnd != null) {
+        if (eventDateEnd != null) {
             sdate = DateFormatUtils.format(eventDateEnd, "yyyy-MM-dd");
         }
-        Map<String,String> map = new HashMap<String,String>();
-        for (java.lang.reflect.Field f : OccurrenceIndex10.class.getDeclaredFields()) {
+        Map<String, String> map = new HashMap<String, String>();
+        for (java.lang.reflect.Field f : OccurrenceIndex20.class.getDeclaredFields()) {
             Field annotation = f.getAnnotation(Field.class);
             if (annotation != null && !annotation.value().contains("*")) {
                 try {
@@ -273,9 +362,9 @@ public class OccurrenceIndex10 implements OccurrenceIndex {
     }
 
     @JsonIgnore
-    public Map<String,String> indexToJsonMap() {
-        Map<String,String> map = new HashMap<String,String>();
-        for (java.lang.reflect.Field f : OccurrenceIndex10.class.getDeclaredFields()) {
+    public Map<String, String> indexToJsonMap() {
+        Map<String, String> map = new HashMap<String, String>();
+        for (java.lang.reflect.Field f : OccurrenceIndex20.class.getDeclaredFields()) {
             Field annotation = f.getAnnotation(Field.class);
             if (annotation != null && !annotation.value().contains("*")) {
                 map.put(annotation.value(), f.getName());
@@ -443,12 +532,12 @@ public class OccurrenceIndex10 implements OccurrenceIndex {
     public void setRaw_countryCode(String raw_countryCode) {
         this.raw_countryCode = raw_countryCode;
     }
-    
-    public String getCountry(){
+
+    public String getCountry() {
         return country;
     }
-    
-    public void setCountry(String country){
+
+    public void setCountry(String country) {
         this.country = country;
     }
 
@@ -507,7 +596,7 @@ public class OccurrenceIndex10 implements OccurrenceIndex {
     public void setGenusGuid(String genusGuid) {
         this.genusGuid = genusGuid;
     }
-    
+
     public String getSpecies() {
         return species;
     }
@@ -523,7 +612,7 @@ public class OccurrenceIndex10 implements OccurrenceIndex {
     public void setSpeciesGuid(String speciesGuid) {
         this.speciesGuid = speciesGuid;
     }
-    
+
     public String getSubspecies() {
         return subspecies;
     }
@@ -531,7 +620,7 @@ public class OccurrenceIndex10 implements OccurrenceIndex {
     public void setSubspecies(String subspecies) {
         this.subspecies = subspecies;
     }
-    
+
     public String getSubspeciesGuid() {
         return subspeciesGuid;
     }
@@ -539,7 +628,7 @@ public class OccurrenceIndex10 implements OccurrenceIndex {
     public void setSubspeciesGuid(String subspeciesGuid) {
         this.subspeciesGuid = subspeciesGuid;
     }
-    
+
     public String getStateProvince() {
         return stateProvince;
     }
@@ -580,13 +669,12 @@ public class OccurrenceIndex10 implements OccurrenceIndex {
         this.year = year;
     }
 
-    public String getMonth() {
+    public Integer getMonth() {
         return month;
     }
 
-    @Field("month")
     public void setMonth(Integer month) {
-        this.month = ((month < 10) ? "0" : "") + String.valueOf(month);
+        this.month = month;
     }
 
     public String getBasisOfRecord() {
@@ -724,8 +812,8 @@ public class OccurrenceIndex10 implements OccurrenceIndex {
     public void setImage(String image) {
         this.image = image;
     }
-    
-    public String[] getImages(){
+
+    public String[] getImages() {
         return images;
     }
 
@@ -733,13 +821,12 @@ public class OccurrenceIndex10 implements OccurrenceIndex {
         this.images = images;
     }
 
-    public String getGeospatialKosherString() {
-        return geospatialKosherString;
+    public Boolean getGeospatialKosher() {
+        return geospatialKosher;
     }
 
-    @Field("geospatial_kosher")
-    public void setGeospatialKosherString(Boolean geospatialKosherString) {
-        this.geospatialKosherString = geospatialKosherString.toString();
+    public void setGeospatialKosher(Boolean geospatialKosher) {
+        this.geospatialKosher = geospatialKosher;
     }
 
     public String getTaxonomicKosher() {
@@ -750,19 +837,11 @@ public class OccurrenceIndex10 implements OccurrenceIndex {
         this.taxonomicKosher = taxonomicKosher;
     }
 
-    public String getCollector() {
+    public String[] getCollector() {
         return collector;
     }
 
-    @Field("collector")
-    public void setCollector(String[] collectors) {
-        this.collectors = collectors;
-        if (collectors != null && collectors.length > 0) {
-            this.collector = collectors[0];
-        }
-    }
-
-    public void setCollector(String collector) {
+    public void setCollector(String[] collector) {
         this.collector = collector;
     }
 
@@ -919,7 +998,7 @@ public class OccurrenceIndex10 implements OccurrenceIndex {
     public void setRecordNumber(String recordNumber) {
         this.recordNumber = recordNumber;
     }
-    
+
     /**
      * @return the occurrence details
      */
@@ -1020,7 +1099,7 @@ public class OccurrenceIndex10 implements OccurrenceIndex {
 
     public String getIdentificationVerificationStatus() {
         return identificationVerificationStatus;
-}
+    }
 
     public void setIdentificationVerificationStatus(String identificationVerificationStatus) {
         this.identificationVerificationStatus = identificationVerificationStatus;

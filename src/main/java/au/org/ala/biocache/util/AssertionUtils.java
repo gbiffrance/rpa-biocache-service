@@ -16,20 +16,15 @@ package au.org.ala.biocache.util;
 
 
 import au.org.ala.biocache.dao.StoreDAO;
-import au.org.ala.biocache.dto.ContactDTO;
-import au.org.ala.biocache.dto.QualityAssertion;
-import au.org.ala.biocache.dto.UserAssertions;
+import au.org.ala.biocache.dto.*;
 import au.org.ala.biocache.service.AuthService;
 import org.apache.solr.common.SolrDocument;
-import org.apache.solr.common.SolrDocumentList;
 import org.springframework.stereotype.Component;
 
 import javax.inject.Inject;
 import java.io.IOException;
-import java.util.List;
-import java.util.Map;
 
-import static au.org.ala.biocache.dto.OccurrenceIndex.*;
+import static au.org.ala.biocache.dto.OccurrenceIndex.ID;
 
 @Component("assertionUtils")
 public class AssertionUtils {
@@ -50,9 +45,9 @@ public class AssertionUtils {
      * @param recordUuid
      * @return quality assertions
      */
-    public UserAssertions getUserAssertions(String recordUuid) throws Exception {
+    public UserAssertions getUserAssertions(String recordUuid, Double version) throws Exception {
         SolrDocument sd = occurrenceUtils.getOcc(recordUuid);
-        return getUserAssertions(sd);
+        return getUserAssertions(sd, version);
     }
 
     /**
@@ -62,13 +57,16 @@ public class AssertionUtils {
      * @param occ
      * @return quality assertions
      */
-    public UserAssertions getUserAssertions(SolrDocument sd) throws IOException {
-        if (sd.containsKey(ROW_KEY)){
+    public UserAssertions getUserAssertions(SolrDocument sd, Double version) throws IOException {
+        if (sd.containsKey(ID)) {
             //set the user assertions
-            UserAssertions userAssertions = storeDao.get(UserAssertions.class, (String) sd.getFieldValue(ROW_KEY));
+            UserAssertions userAssertions = storeDao.get(UserAssertions.class, (String) sd.getFieldValue(OccurrenceIndex.ID));
             //Legacy integration - fix up the user assertions - legacy - to add replace with CAS IDs....
-            for(QualityAssertion ua : userAssertions.getUserAssertions()){
-                if(ua.getUserId().contains("@")){
+            for (QualityAssertion ua : userAssertions) {
+                // remove snapshot
+                ua.setSnapshot(null);
+
+                if (ua.getUserId().contains("@")) {
                     String email = ua.getUserId();
                     String userId = authService.getMapOfEmailToId().get(email);
                     ua.setUserEmail(email);
@@ -76,7 +74,7 @@ public class AssertionUtils {
                 }
 
                 //add user roles....
-                enhanceQA(sd, ua);
+                enhanceQA(sd, ua, version);
             }
 
             return userAssertions;
@@ -85,19 +83,22 @@ public class AssertionUtils {
         }
     }
 
-    public QualityAssertion enhanceQA(SolrDocument sd, QualityAssertion ua) {
+    public QualityAssertion enhanceQA(SolrDocument sd, QualityAssertion ua, Double version) {
+        String collectionUid = version == 1.0 ? OccurrenceIndex10.COLLECTION_UID : OccurrenceIndex20.COLLECTION_UID;
+        String collectionName = version == 1.0 ? OccurrenceIndex10.COLLECTION_NAME : OccurrenceIndex20.COLLECTION_NAME;
+
         String email = ua.getUserEmail();
-        ContactDTO contact = contactUtils.getContactForEmailAndUid(email, (String) sd.getFieldValue(COLLECTION_UID));
-        if(contact != null){
+        ContactDTO contact = contactUtils.getContactForEmailAndUid(email, (String) sd.getFieldValue(collectionUid));
+        if (contact != null) {
             ua.setUserRole(contact.getRole());
-            ua.setUserEntityName((String) sd.getFieldValue(COLLECTION_NAME));
-            ua.setUserEntityUid((String) sd.getFieldValue(COLLECTION_UID));
+            ua.setUserEntityName((String) sd.getFieldValue(collectionName));
+            ua.setUserEntityUid((String) sd.getFieldValue(collectionUid));
         }
         return ua;
     }
 
-    public QualityAssertion enhanceQA(String recordUuid, QualityAssertion ua) throws Exception {
+    public QualityAssertion enhanceQA(String recordUuid, QualityAssertion ua, Double version) throws Exception {
         SolrDocument sd = occurrenceUtils.getOcc(recordUuid);
-        return enhanceQA(sd, ua);
+        return enhanceQA(sd, ua, version);
     }
 }

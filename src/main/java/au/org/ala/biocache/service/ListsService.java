@@ -155,7 +155,7 @@ public class ListsService {
      */
     @Cacheable(cacheName = "speciesKvp", decoratedCacheType = DecoratedCacheType.REFRESHING_SELF_POPULATING_CACHE,
             refreshInterval = 10 * 60 * 1000)
-    public List<Kvp> getKvp(String dataResourceUid) {
+    public List<Kvp> getKvp(String dataResourceUid, Double version) {
         List<Kvp> list = new ArrayList();
 
         try {
@@ -164,7 +164,7 @@ public class ListsService {
             for (SpeciesListItemDTO item : speciesListItems) {
                 if (item.lsid != null) {
                     // ignore species list item when there are no lft rgt values for the LSID
-                    String fq = searchUtils.getTaxonSearch(item.lsid)[0];
+                    String fq = searchUtils.getTaxonSearch(item.lsid, version)[0];
                     if (fq.startsWith("lft:[")) {
                         List<String> keys = new ArrayList<>();
                         List<String> values = new ArrayList<>();

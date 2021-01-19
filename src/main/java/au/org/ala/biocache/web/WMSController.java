@@ -18,7 +18,6 @@ import au.org.ala.biocache.dao.QidCacheDAO;
 import au.org.ala.biocache.dao.SearchDAO;
 import au.org.ala.biocache.dao.TaxonDAO;
 import au.org.ala.biocache.dto.*;
-import au.org.ala.biocache.dto.Qid;
 import au.org.ala.biocache.util.*;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -57,8 +56,8 @@ import java.io.PrintWriter;
 import java.io.RandomAccessFile;
 import java.net.URL;
 import java.net.URLEncoder;
-import java.util.*;
 import java.util.List;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -164,7 +163,10 @@ public class WMSController extends AbstractSecureController{
     protected String bieUiUrl;
 
     @Value("${wms.capabilities.focus:latitude:[-90 TO 90] AND longitude:[-180 TO 180]}")
-    protected String limitToFocusValue;
+    protected String limitToFocusValue10;
+
+    @Value("${wms.capabilities.focus.2.0:decimalLatitude:[-90 TO 90] AND decimaLongitude:[-180 TO 180]}")
+    protected String limitToFocusValue20;
 
     /**
      * Threshold for caching a whole PointType for a query or only caching the current bounding box.
@@ -794,6 +796,7 @@ public class WMSController extends AbstractSecureController{
     }
 
     // add this to the GetCapabilities...
+    // version 2.0 solr schema
     @RequestMapping(value = {"/ogc/getMetadata"}, method = RequestMethod.GET)
     public String getMetadata(
             @RequestParam(value = "LAYER", required = false, defaultValue = "") String layer,
@@ -832,7 +835,7 @@ public class WMSController extends AbstractSecureController{
             JsonNode idNode = guidLookupNode.get(0).get("acceptedIdentifier");//NC: changed to used the acceptedIdentifier because this will always hold the guid for the accepted taxon concept whether or not a synonym name is provided
             guid = idNode != null ? idNode.asText() : null;
         }
-        String newQuery = "raw_name:" + taxonName;
+        String newQuery = OccurrenceIndex.RAW_NAME + ":" + taxonName;
         if (guid != null) {
 
             model.addAttribute("guid", guid);
@@ -860,7 +863,7 @@ public class WMSController extends AbstractSecureController{
 
             JsonNode leftNode = tc.get("left");
             JsonNode rightNode = tc.get("right");
-            newQuery = leftNode != null && rightNode != null ? "lft:[" + leftNode.asText() + " TO " + rightNode.asText() + "]" : "taxon_concept_lsid:" + guid;
+            newQuery = leftNode != null && rightNode != null ? "lft:[" + leftNode.asText() + " TO " + rightNode.asText() + "]" : "taxonConceptID:" + guid;
             if (logger.isDebugEnabled()) {
                 logger.debug("The new query : " + newQuery);
             }
@@ -904,8 +907,9 @@ public class WMSController extends AbstractSecureController{
         }
 
         SpatialSearchRequestParams searchParams = new SpatialSearchRequestParams();
+        searchParams.setVersion(2.0);
         searchParams.setQ(newQuery);
-        searchParams.setFacets(new String[]{"data_resource"});
+        searchParams.setFacets(new String[]{OccurrenceIndex20.DATA_RESOURCE_NAME});
         searchParams.setPageSize(0);
         List<FacetResultDTO> facets = searchDAO.getFacetCounts(searchParams);
         model.addAttribute("query", newQuery); //need a facet on data providers
@@ -924,6 +928,7 @@ public class WMSController extends AbstractSecureController{
             @RequestParam(value = "QUERY_LAYERS", required = false, defaultValue = "") String queryLayers,
             @RequestParam(value = "X", required = true, defaultValue = "0") Double x,
             @RequestParam(value = "Y", required = true, defaultValue = "0") Double y,
+            @RequestParam(value = "VERSION", required = false, defaultValue = "1.0") Double version,
             Model model) throws Exception {
 
         if (logger.isDebugEnabled()) {
@@ -957,7 +962,7 @@ public class WMSController extends AbstractSecureController{
 //        double roundedLongitude = pointType.roundToPointType(longitude);
 //        double roundedLatitude = pointType.roundToPointType(latitude);
         double roundedLongitude =longitude;
-        double roundedLatitude =latitude;
+        double roundedLatitude = latitude;
 
         //get the pixel size of the circles
         double minLng = pointType.roundDownToPointType(roundedLongitude - (pointType.getValue() * 2 * (size + 3)));
@@ -967,13 +972,18 @@ public class WMSController extends AbstractSecureController{
 
         //do the SOLR query
         SpatialSearchRequestParams requestParams = new SpatialSearchRequestParams();
+        requestParams.setVersion(version);
+
+        String longitudeField = version == 1.0 ? OccurrenceIndex10.LONGITUDE : OccurrenceIndex20.LONGITUDE;
+        String latitudeField = version == 1.0 ? OccurrenceIndex10.LATITUDE : OccurrenceIndex20.LATITUDE;
+
         String q = WMSUtils.convertLayersParamToQ(queryLayers);
         requestParams.setQ(WMSUtils.convertLayersParamToQ(queryLayers));  //need to derive this from the layer name
         if (logger.isDebugEnabled()) {
-            logger.debug("WMS GetFeatureInfo for " + queryLayers + ", longitude:[" + minLng + " TO " + maxLng + "],  latitude:[" + minLat + " TO " + maxLat + "]");
+            logger.debug("WMS GetFeatureInfo for " + queryLayers + ", " + longitudeField + ":[" + minLng + " TO " + maxLng + "],  " + latitudeField + ":[" + minLat + " TO " + maxLat + "]");
         }
 
-        String[] fqs = new String[]{"longitude:[" + minLng + " TO " + maxLng + "]", "latitude:[" + minLat + " TO " + maxLat + "]"};
+        String[] fqs = new String[]{longitudeField + ":[" + minLng + " TO " + maxLng + "]", latitudeField + ":[" + minLat + " TO " + maxLat + "]"};
         requestParams.setFq(fqs);
         requestParams.setFacet(false);
 
@@ -1139,6 +1149,7 @@ public class WMSController extends AbstractSecureController{
                     layers,
                     x,
                     y,
+                    requestParams.getVersion(),
                     model);
             return;
         }
@@ -1259,20 +1270,24 @@ public class WMSController extends AbstractSecureController{
             writer.write(generateStylesForPoints());
 
             if (spatiallyValidOnly) {
-                filterQueries = org.apache.commons.lang3.ArrayUtils.add(filterQueries, "geospatial_kosher:true");
+                filterQueries = org.apache.commons.lang3.ArrayUtils.add(filterQueries, OccurrenceIndex20.GEOSPATIAL_KOSHER + ":true");
             }
 
             if (marineOnly) {
-                filterQueries = org.apache.commons.lang3.ArrayUtils.add(filterQueries, "species_habitats:Marine OR species_habitats:\"Marine and Non-marine\"");
+                filterQueries = org.apache.commons.lang3.ArrayUtils.add(filterQueries, OccurrenceIndex20.SPECIES_HABITATS + ":Marine OR " + OccurrenceIndex20.SPECIES_HABITATS + ":\"Marine and Non-marine\"");
             }
 
             if (terrestrialOnly) {
-                filterQueries = org.apache.commons.lang3.ArrayUtils.add(filterQueries, "species_habitats:\"Non-marine\" OR species_habitats:Limnetic");
+                filterQueries = org.apache.commons.lang3.ArrayUtils.add(filterQueries, OccurrenceIndex20.SPECIES_HABITATS + ":\"Non-marine\" OR " + OccurrenceIndex20.SPECIES_HABITATS + ":Limnetic");
             }
 
             if (limitToFocus) {
                 //TODO retrieve focus from config file
-                filterQueries = org.apache.commons.lang3.ArrayUtils.add(filterQueries, limitToFocusValue);
+                if (requestParams.getVersion() == 1.0) {
+                    filterQueries = org.apache.commons.lang3.ArrayUtils.add(filterQueries, limitToFocusValue10);
+                } else {
+                    filterQueries = org.apache.commons.lang3.ArrayUtils.add(filterQueries, limitToFocusValue20);
+                }
             }
 
             query = searchUtils.convertRankAndName(query);
@@ -1437,9 +1452,13 @@ public class WMSController extends AbstractSecureController{
             logger.debug("Rendering: " + pointType.name());
         }
 
+        String longitudeField = requestParams.getVersion() == 1.0 ? OccurrenceIndex10.LONGITUDE : OccurrenceIndex20.LONGITUDE;
+        String latitudeField = requestParams.getVersion() == 1.0 ? OccurrenceIndex10.LATITUDE : OccurrenceIndex20.LATITUDE;
+
+
         String[] boundingBoxFqs = new String[2];
-        boundingBoxFqs[0] = String.format(Locale.ROOT, "longitude:[%f TO %f]", bbox[0], bbox[2]);
-        boundingBoxFqs[1] = String.format(Locale.ROOT, "latitude:[%f TO %f]", bbox[1], bbox[3]);
+        boundingBoxFqs[0] = String.format(Locale.ROOT, longitudeField + ":[%f TO %f]", bbox[0], bbox[2]);
+        boundingBoxFqs[1] = String.format(Locale.ROOT, latitudeField + ":[%f TO %f]", bbox[1], bbox[3]);
 
         int pointWidth = vars.size * 2;
         double width_mult = (width / (pbbox[2] - pbbox[0]));
@@ -1915,23 +1934,28 @@ public class WMSController extends AbstractSecureController{
         //only draw uncertainty if max radius will be > dot size
         if (vars.uncertainty && MAX_UNCERTAINTY > min_uncertainty) {
 
+            String coordinateUncertainty = requestParams.getVersion() == 1.0 ? OccurrenceIndex10.COORDINATE_UNCERTAINTY : OccurrenceIndex20.COORDINATE_UNCERTAINTY;
             //uncertainty colour/fq/radius, [0]=map, [1]=not specified, [2]=too large
             Color[] uncertaintyColours = {new Color(255, 170, 0, vars.alpha), new Color(255, 255, 100, vars.alpha), new Color(50, 255, 50, vars.alpha)};
             //TODO: don't assume MAX_UNCERTAINTY > default_uncertainty
-            String[] uncertaintyFqs = {"coordinate_uncertainty:[" + min_uncertainty + " TO " + MAX_UNCERTAINTY + "] AND -assertions:uncertaintyNotSpecified", "assertions:uncertaintyNotSpecified", "coordinate_uncertainty:[" + MAX_UNCERTAINTY + " TO *]"};
+            String[] uncertaintyFqs = {coordinateUncertainty + ":[" + min_uncertainty + " TO " + MAX_UNCERTAINTY + "] AND -assertions:uncertaintyNotSpecified", "assertions:uncertaintyNotSpecified", coordinateUncertainty + ":[" + MAX_UNCERTAINTY + " TO *]"};
             double[] uncertaintyR = {-1, MAX_UNCERTAINTY, MAX_UNCERTAINTY};
 
             int originalFqsLength = originalFqs != null ? originalFqs.length : 0;
 
             String[] fqs = new String[originalFqsLength + 3];
 
-            if(originalFqsLength > 0) {
+            if (originalFqsLength > 0) {
                 System.arraycopy(originalFqs, 0, fqs, 3, originalFqsLength);
             }
 
+            String longitudeField = requestParams.getVersion() == 1.0 ? OccurrenceIndex10.LONGITUDE : OccurrenceIndex20.LONGITUDE;
+            String latitudeField = requestParams.getVersion() == 1.0 ? OccurrenceIndex10.LATITUDE : OccurrenceIndex20.LATITUDE;
+
+
             //expand bounding box to cover MAX_UNCERTAINTY radius (m to degrees)
-            fqs[1] = "longitude:[" + (bbox[0] - MAX_UNCERTAINTY / 100000.0) + " TO " + (bbox[2] + MAX_UNCERTAINTY / 100000.0) + "]";
-            fqs[2] = "latitude:[" + (bbox[1] - MAX_UNCERTAINTY / 100000.0) + " TO " + (bbox[3] + MAX_UNCERTAINTY / 100000.0) + "]";
+            fqs[1] = longitudeField + ":[" + (bbox[0] - MAX_UNCERTAINTY / 100000.0) + " TO " + (bbox[2] + MAX_UNCERTAINTY / 100000.0) + "]";
+            fqs[2] = latitudeField + ":[" + (bbox[1] - MAX_UNCERTAINTY / 100000.0) + " TO " + (bbox[3] + MAX_UNCERTAINTY / 100000.0) + "]";
 
             requestParams.setPageSize(DEFAULT_PAGE_SIZE);
 
@@ -1945,7 +1969,7 @@ public class WMSController extends AbstractSecureController{
                 requestParams.setFq(fqs);
 
                 //There can be performance issues with pivot when too many distinct coordinate_uncertainty values
-                requestParams.setFacets(new String[]{"coordinate_uncertainty", pointType.getLabel()});
+                requestParams.setFacets(new String[]{coordinateUncertainty, pointType.getLabel()});
                 requestParams.setFlimit(-1);
                 requestParams.setFormattedQuery(null);
                 List<FacetPivotResultDTO> qr = searchDAO.searchPivot(requestParams);

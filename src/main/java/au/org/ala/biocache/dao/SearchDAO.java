@@ -17,7 +17,6 @@ package au.org.ala.biocache.dao;
 import au.org.ala.biocache.dto.*;
 import au.org.ala.biocache.util.LegendItem;
 import org.apache.solr.client.solrj.response.FacetField;
-import org.apache.solr.client.solrj.response.FieldStatsInfo;
 import org.apache.solr.client.solrj.response.QueryResponse;
 import org.apache.solr.common.SolrDocumentList;
 
@@ -26,7 +25,6 @@ import java.io.OutputStream;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -219,7 +217,7 @@ public interface SearchDAO {
      */
     List<DataProviderCountDTO> getDataProviderCounts() throws Exception;
 
-    List<FieldResultDTO> findRecordByStateFor(String query) throws Exception;
+    List<FieldResultDTO> findRecordByStateFor(String query, Double version) throws Exception;
 
     /**
      * Find all the sources for the supplied query
@@ -241,11 +239,12 @@ public interface SearchDAO {
 
     /**
      * Returns the occurrence counts based on lft and rgt values for each of the supplied taxa.
+     *
      * @param taxa
      * @return
      * @throws Exception
      */
-    Map<String, Integer> getOccurrenceCountsForTaxa(List<String> taxa, String[] filterQueries) throws Exception;
+    Map<String, Integer> getOccurrenceCountsForTaxa(List<String> taxa, String[] filterQueries, Double version) throws Exception;
 
     /**
      * Returns the scientific name and counts for the taxon rank that proceed or include the supplied rank.

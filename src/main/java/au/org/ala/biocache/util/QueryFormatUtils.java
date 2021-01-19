@@ -1,11 +1,7 @@
 package au.org.ala.biocache.util;
 
 import au.org.ala.biocache.dao.QidCacheDAO;
-import au.org.ala.biocache.dao.SearchDAOImpl;
-import au.org.ala.biocache.dto.Facet;
-import au.org.ala.biocache.dto.SearchRequestParams;
-import au.org.ala.biocache.dto.SpatialSearchRequestParams;
-import au.org.ala.biocache.dto.Qid;
+import au.org.ala.biocache.dto.*;
 import au.org.ala.biocache.service.AuthService;
 import au.org.ala.biocache.service.LayersService;
 import au.org.ala.biocache.service.ListsService;
@@ -29,6 +25,7 @@ import java.util.regex.MatchResult;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import static au.org.ala.biocache.dto.OccurrenceIndex.CONTAINS_SENSITIVE_PATTERN;
 import static java.util.stream.Collectors.joining;
 import static java.util.stream.Collectors.toList;
 import static java.util.stream.StreamSupport.stream;
@@ -73,7 +70,8 @@ public class QueryFormatUtils {
     protected Pattern urnPattern = Pattern.compile("\\burn:[a-zA-Z0-9\\.:-]*");
     protected Pattern httpPattern = Pattern.compile("http:[a-zA-Z0-9/\\.:\\-_]*");
     protected Pattern spacesPattern = Pattern.compile("[^\\s\"\\(\\)\\[\\]{}']+|\"[^\"]*\"|'[^']*'");
-    protected Pattern uidPattern = Pattern.compile("(?:[\"]*)?([a-z_]*_uid:)([a-z0-9]*)(?:[\"]*)?");
+    protected Pattern uidPattern10 = Pattern.compile("(?:[\"]*)?([a-z_]*_uid:)([a-z0-9]*)(?:[\"]*)?");
+    protected Pattern uidPattern20 = Pattern.compile("(?:[\"]*)?([a-z]*Uid:)([a-z0-9]*)(?:[\"]*)?");
     protected Pattern spatialPattern = Pattern.compile(spatialField + ":\"Intersects\\([a-zA-Z=\\-\\s0-9\\.\\,():]*\\)\\\"");
     protected Pattern qidPattern = QidCacheDAO.qidPattern;//Pattern.compile("qid:[0-9]*");
     protected Pattern termPattern = Pattern.compile("([a-zA-z_]+?):((\".*?\")|(\\\\ |[^: \\)\\(])+)"); // matches foo:bar, foo:"bar bash" & foo:bar\ bash
@@ -282,9 +280,11 @@ public class QueryFormatUtils {
      *
      * @param current String [] { displayString, formattedQuery } to update.
      */
-    private String [] formatTerms(String [] current) {
+    private String[] formatTerms(String[] current, Double version) {
         // look for field:term sub queries and catch fields: matched_name & matched_name_children
-        if (current != null && current.length >=2 && current[1] != null && current[1].contains(":")) {
+        if (current != null && current.length >= 2 && current[1] != null && current[1].contains(":")) {
+            String taxonName = version == 1.0 ? OccurrenceIndex10.TAXON_NAME : OccurrenceIndex20.TAXON_NAME;
+
             StringBuffer queryString = new StringBuffer();
 
             // will match foo:bar, foo:"bar bash" & foo:bar\ bash
@@ -316,15 +316,15 @@ public class QueryFormatUtils {
                             }
 
                             if (acceptedName != null && !acceptedName.isEmpty()) {
-                                field = "taxon_name";
+                                field = taxonName;
                                 queryText = acceptedName;
                             }
                         } else {
-                            field = "taxon_name";
+                            field = taxonName;
                         }
 
                         // also change the display query
-                        current[0] = current[0].replaceAll("matched_name", "taxon_name");
+                        current[0] = current[0].replaceAll("matched_name", taxonName);
                     }
 
                     if (StringUtils.containsAny(queryText, CHARS) && !queryText.startsWith("[") && !queryText.startsWith("\"")) {
@@ -352,7 +352,7 @@ public class QueryFormatUtils {
                             field = "lsid";
                             queryText = guid;
                         } else {
-                            field = "taxon_name";
+                            field = taxonName;
                         }
                     }
 
@@ -424,8 +424,8 @@ public class QueryFormatUtils {
      *
      * @param current String [] { displayString, formattedQuery } to update.
      */
-    private void formatSpeciesList(String [] current) {
-        if(current == null || current.length < 2 || current[1] == null){
+    private void formatSpeciesList(String[] current, Double version) {
+        if (current == null || current.length < 2 || current[1] == null) {
             return;
         }
 
@@ -440,11 +440,20 @@ public class QueryFormatUtils {
             try {
                 List<String> lsids = listsService.getListItems(speciesList);
 
-                List<String> strings = lsids.stream()
-                        .map(searchUtils::getTaxonSearch)
-                        .filter(t -> t.length > 1)
-                        .map(t -> t[0])
-                        .collect(toList());
+                List<String> strings;
+                if (version == 1.0) {
+                    strings = lsids.stream()
+                            .map(searchUtils::getTaxonSearch10)
+                            .filter(t -> t.length > 1)
+                            .map(t -> t[0])
+                            .collect(toList());
+                } else {
+                    strings = lsids.stream()
+                            .map(searchUtils::getTaxonSearch20)
+                            .filter(t -> t.length > 1)
+                            .map(t -> t[0])
+                            .collect(toList());
+                }
                 Iterable<List<String>> partition = Iterables.partition(strings, max - 10);
                 String q = stream(partition.spliterator(), false)
                         .map(part -> part.stream()
@@ -490,8 +499,8 @@ public class QueryFormatUtils {
      *
      * @param current String [] { displayString, formattedQuery } to update.
      */
-    private void formatLsid(String [] current) {
-        if(current == null || current.length < 2 || current[1] == null){
+    private void formatLsid(String[] current, Double version) {
+        if (current == null || current.length < 2 || current[1] == null) {
             return;
         }
 
@@ -524,14 +533,16 @@ public class QueryFormatUtils {
                     if (logger.isDebugEnabled()) {
                         logger.debug("lsid = " + lsid);
                     }
-                    String[] values = searchUtils.getTaxonSearch(lsid);
+                    String[] values = searchUtils.getTaxonSearch(lsid, version);
 
-                    if( value != null && values.length > 0) {
+                    String taxonConceptId = version == 1.0 ? OccurrenceIndex10.TAXON_CONCEPT_ID : OccurrenceIndex20.TAXON_CONCEPT_ID;
+
+                    if (value != null && values.length > 0) {
 
                         matcher.appendReplacement(queryString, lsidHeader + values[0]);
 
                         displaySb.append(current[0].substring(last, matcher.start()));
-                        if (!values[1].startsWith("taxon_concept_lsid:")) {
+                        if (!values[1].startsWith(taxonConceptId + ":")) {
                             displaySb.append(lsidHeader).append("<span class='lsid' id='").append(lsid).append("'>").append(values[1]).append("</span>");
                         } else {
                             displaySb.append(lsidHeader).append(values[1]);
@@ -695,15 +706,19 @@ public class QueryFormatUtils {
             return;
         }
 
-        current[1] = formatString(current[1], true);
+        current[1] = formatString(current[1], true, searchParams.getVersion());
 
         Matcher matcher;
         StringBuffer displaySb = new StringBuffer();
         //substitute better display strings for collection/inst etc searches
-        if (current[0].contains("_uid")) {
+        if (current[0].contains("_uid") || current[0].contains("Uid")) {
             displaySb.setLength(0);
             String normalised = current[0].replaceAll("\"", "");
-            matcher = uidPattern.matcher(normalised);
+            if (searchParams.getVersion() == 1.0) {
+                matcher = uidPattern10.matcher(normalised);
+            } else {
+                matcher = uidPattern20.matcher(normalised);
+            }
             while (matcher.find()) {
                 String newVal = "<span>" + searchUtils.getUidDisplayString(matcher.group(1), matcher.group(2)) + "</span>";
                 matcher.appendReplacement(displaySb, newVal);
@@ -762,11 +777,11 @@ public class QueryFormatUtils {
     public String [] formatQueryTerm(String query, SpatialSearchRequestParams searchParams) {
         String [] formatted = formatQid(query, searchParams);
 
-        formatTerms(formatted);
+        formatTerms(formatted, searchParams.getVersion());
         formatTaxa(formatted);
-        formatSpeciesList(formatted);
+        formatSpeciesList(formatted, searchParams.getVersion());
 
-        formatLsid(formatted);
+        formatLsid(formatted, searchParams.getVersion());
         formatUrn(formatted);
         formatHttp(formatted);
         formatTitleMap(formatted);
@@ -775,7 +790,7 @@ public class QueryFormatUtils {
             formatGeneral(formatted, searchParams);
         }
 
-        formatted[0] = formatString(formatted[0], false);
+        formatted[0] = formatString(formatted[0], false, searchParams.getVersion());
 
         return formatted;
     }
@@ -783,11 +798,11 @@ public class QueryFormatUtils {
     /**
      * Substitute text with i18n properties or escape for SOLR.
      *
-     * @param text String to format
+     * @param text    String to format
      * @param isQuery
      * @return
      */
-    public String formatString(String text, boolean isQuery) {
+    public String formatString(String text, boolean isQuery, Double version) {
         if (StringUtils.trimToNull(text) == null) return text;
 
         // Queries containing OR, AND or Intersects( must already be correctly escaped for SOLR
@@ -880,7 +895,7 @@ public class QueryFormatUtils {
                             i18nForValue = extractedValue;
                         }
                     } else {
-                        String formattedExtractedValue = formatValue(matchedIndexTerm, extractedValue);
+                        String formattedExtractedValue = formatValue(matchedIndexTerm, extractedValue, version);
                         i18nForValue = messageSource.getMessage(matchedIndexTerm + "." + formattedExtractedValue, null, "", null);
                         if (i18nForValue.length() == 0)
                             i18nForValue = messageSource.getMessage(formattedExtractedValue, null, formattedExtractedValue, null);
@@ -904,14 +919,19 @@ public class QueryFormatUtils {
         }
     }
 
-    private String formatValue(String fn, String fv) {
+    private String formatValue(String fn, String fv, Double version) {
         fv = SearchUtils.stripEscapedQuotes(fv);
 
-        if (StringUtils.equals(fn, "species_guid") || StringUtils.equals(fn, "genus_guid")) {
-            fv = searchUtils.substituteLsidsForNames(fv.replaceAll("\"",""));
-        } else if (StringUtils.equals(fn, "occurrence_year")) {
+        String speciesGuid = version == 1.0 ? OccurrenceIndex10.SPECIESID : OccurrenceIndex20.SPECIESID;
+        String genusGuid = version == 1.0 ? OccurrenceIndex10.GENUSID : OccurrenceIndex20.GENUSID;
+        String occurrenceYear = version == 1.0 ? OccurrenceIndex10.OCCURRENCE_YEAR_INDEX_FIELD : OccurrenceIndex20.OCCURRENCE_YEAR_INDEX_FIELD;
+        String month = OccurrenceIndex.MONTH;
+
+        if (StringUtils.equals(fn, speciesGuid) || StringUtils.equals(fn, genusGuid)) {
+            fv = searchUtils.substituteLsidsForNames(fv.replaceAll("\"", ""));
+        } else if (StringUtils.equals(fn, occurrenceYear)) {
             fv = searchUtils.substituteYearsForDates(fv);
-        } else if (StringUtils.equals(fn, "month")) {
+        } else if (StringUtils.equals(fn, month)) {
             fv = searchUtils.substituteMonthNamesForNums(fv);
         } else if (searchUtils.getAuthIndexFields().contains(fn)) {
             if (authService.getMapOfAllUserNamesById().containsKey(StringUtils.remove(fv, "\"")))
@@ -968,16 +988,17 @@ public class QueryFormatUtils {
         String qc = searchParams.getQc();
         if (StringUtils.isNotEmpty(qc)) {
             //add the query context to the filter query
-            addFormattedFq(getQueryContextAsArray(qc), searchParams);
+            addFormattedFq(getQueryContextAsArray(qc, searchParams.getVersion()), searchParams);
         }
     }
 
-    public String[] getQueryContextAsArray(String queryContext) {
+    public String[] getQueryContextAsArray(String queryContext, Double version) {
+        String dataHubUid = version == 1.0 ? OccurrenceIndex10.DATA_HUB_UID : OccurrenceIndex20.DATA_HUB_UID;
         if (StringUtils.isNotEmpty(queryContext)) {
             String[] values = queryContext.split(",");
             for (int i = 0; i < values.length; i++) {
                 String field = values[i];
-                values[i] = field.replace("hub:", "data_hub_uid:");
+                values[i] = field.replace("hub:", dataHubUid + ":");
             }
             //add the query context to the filter query
             return values;
@@ -1095,8 +1116,8 @@ public class QueryFormatUtils {
     }
 
     public static void assertNoSensitiveValues(Class c, String property, String input) {
-        if (input != null && input.matches(SearchDAOImpl.CONTAINS_SENSITIVE_PATTERN)) {
-            InvalidPropertyException e = new InvalidPropertyException(c, property, "Input cannot contain any of: " + org.apache.commons.lang3.StringUtils.join(SearchDAOImpl.sensitiveSOLRHdr, ", "));
+        if (input != null && input.matches(CONTAINS_SENSITIVE_PATTERN)) {
+            InvalidPropertyException e = new InvalidPropertyException(c, property, "Input cannot contain any of: " + org.apache.commons.lang3.StringUtils.join(OccurrenceIndex.sensitiveSOLRHdr, ", "));
             logger.error("Input matches a sensitive field", e);
             throw e;
         }

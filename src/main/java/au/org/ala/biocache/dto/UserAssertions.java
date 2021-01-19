@@ -1,28 +1,16 @@
 package au.org.ala.biocache.dto;
 
-import org.codehaus.jackson.annotate.JsonIgnore;
-
 import java.util.ArrayList;
-import java.util.List;
 
-public class UserAssertions {
+public class UserAssertions extends ArrayList<QualityAssertion> {
 
-  List<QualityAssertion> userAssertions = new ArrayList();
-
-  public UserAssertions() {}
-
-  public List<QualityAssertion> getUserAssertions() {
-    return userAssertions;
+  public UserAssertions() {
   }
 
-  public void addUserAssertion(QualityAssertion qa) {
-    userAssertions.add(qa);
-  }
-
-  public void deleteUserAssertion(String uuid) {
-    for (int i=0;i<userAssertions.size();i++) {
-      if (userAssertions.get(i).getUuid().equals(uuid)) {
-        userAssertions.remove(i);
+  public void deleteUuid(String uuid) {
+    for (int i = 0; i < this.size(); i++) {
+      if (this.get(i).getUuid().equals(uuid)) {
+        this.remove(i);
       }
     }
   }

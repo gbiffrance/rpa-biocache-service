@@ -4,17 +4,20 @@ import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.List;
 
+import static au.org.ala.biocache.dto.ErrorCode.Category.Error;
 import static au.org.ala.biocache.dto.ErrorCode.Category.*;
+
+// TODO: Use pipeline assertion codes instead of biocache-store assertion codes
 
 /**
  * Assertion codes for records. These codes are a reflection of http://bit.ly/evMJv5
- *
+ * <p>
  * Merged from biocache-store
  */
 public class AssertionCodes {
 
         //geospatial issues
-        static final public ErrorCode GEOSPATIAL_ISSUE = new ErrorCode("geospatialIssue",0,true,"Geospatial issue", Warning);  // general purpose option
+        static final public ErrorCode GEOSPATIAL_ISSUE = new ErrorCode("geospatialIssue", 0, true, "Geospatial issue", Warning);  // general purpose option
         static final public ErrorCode NEGATED_LATITUDE = new ErrorCode("negatedLatitude",1,false,"Latitude is negated", Warning);
         static final public ErrorCode NEGATED_LONGITUDE = new ErrorCode("negatedLongitude",2,false,"Longitude is negated", Warning);
         static final public ErrorCode INVERTED_COORDINATES = new ErrorCode("invertedCoordinates",3,false,"Coordinates are transposed", Warning);
@@ -161,15 +164,33 @@ public class AssertionCodes {
                     if (field.getType() == ErrorCode.class) {
                             try {
                                     list.add((ErrorCode) field.get(null));
-                                    } catch (Exception e) {
-                                        // Igore exceptions
-                                    }
+                            } catch (Exception e) {
+                                    // Igore exceptions
+                            }
 
                     }
             }
-            return (ErrorCode[]) list.toArray();
+            return list.toArray(new ErrorCode[0]);
 
     }
+
+        public static ErrorCode getByName(String name) {
+                for (Field field : AssertionCodes.class.getFields()) {
+                        if (field.getType() == ErrorCode.class) {
+                                try {
+                                        ErrorCode ec = (ErrorCode) field.get(null);
+                                        if (ec.name.equals(name) || field.getName().equals(name)) {
+                                                return ec;
+                                        }
+                                } catch (Exception e) {
+                                        // Igore exceptions
+                                }
+
+                        }
+                }
+                return null;
+        }
+
 //        //the assertions that are NOT performed during the processing phase
 //        static final public ErrorCode offlineAssertionCodes = Array(INFERRED_DUPLICATE_RECORD, SPECIES_OUTSIDE_EXPERT_RANGE, DETECTED_OUTLIER)
 //
@@ -224,4 +245,6 @@ public class AssertionCodes {
 //        //val code = AssertionCodes.taxonomicCodes.find(c => c.code == qa)
 //        //!code.isEmpty && code.get.isFatal
 //  }).isEmpty
+
+
 }

@@ -1,8 +1,6 @@
 package au.org.ala.biocache.util;
 
-import au.org.ala.biocache.dto.OccurrenceSourceDTO;
-import au.org.ala.biocache.dto.SearchRequestParams;
-import au.org.ala.biocache.dto.SpatialSearchRequestParams;
+import au.org.ala.biocache.dto.*;
 import au.org.ala.biocache.service.SpeciesLookupService;
 import au.org.ala.names.model.NameSearchResult;
 import au.org.ala.names.model.RankType;
@@ -67,9 +65,9 @@ public class SearchUtils {
         }
     }
 
-    private  final List<String> ranks = (List<String>) org.springframework.util.CollectionUtils
-      .arrayToList(new String[]{"kingdom", "phylum", "class", "order",
-              "family", "genus", "species"});
+    private final List<String> ranks = (List<String>) org.springframework.util.CollectionUtils
+            .arrayToList(new String[]{OccurrenceIndex.KINGDOM, OccurrenceIndex.PHYLUM, OccurrenceIndex.CLASS, OccurrenceIndex.ORDER,
+                    OccurrenceIndex.FAMILY, OccurrenceIndex.GENUS, OccurrenceIndex.SPECIES});
 
     /**
      * Util to filter SimpleOrderedMap output from a SOLR json.facet query and return the result of
@@ -154,7 +152,7 @@ public class SearchUtils {
             // query the collectory for the institute and collection codes
             // needed to perform the search
             String[] uids = uid.split(",");
-            searchParams.setQ(getUIDSearchString(uids));
+            searchParams.setQ(getUIDSearchString(uids, searchParams.getVersion()));
             return true;
         } catch (Exception e) {
             logger.error("Problem contacting the collectory: " + e.getMessage(), e);
@@ -162,12 +160,12 @@ public class SearchUtils {
         }
     }
 
-    public String getUIDSearchString(String[] uids){
+    public String getUIDSearchString(String[] uids, Double version) {
         StringBuilder sb = new StringBuilder();
-        for(String uid : uids){
-            if(sb.length()>0)
+        for (String uid : uids) {
+            if (sb.length() > 0)
                 sb.append(" OR ");
-            sb.append(getUidSearchField(uid));
+            sb.append(getUidSearchField(uid, version));
             sb.append(":");
             sb.append(uid);
         }
@@ -261,7 +259,7 @@ public class SearchUtils {
                 try {
                     NameSearchResult r = null;//TODO: Config.nameIndex().searchForRecord(scientificName, rankType);
                     if(r != null){
-                        return "lft:[" + r.getLeft() + " TO " + r.getRight() + "]";
+                        return OccurrenceIndex.LFT + ":[" + r.getLeft() + " TO " + r.getRight() + "]";
                     }
                 } catch (Exception e) {
                     //fail silently if the parse failed
@@ -278,26 +276,35 @@ public class SearchUtils {
      * @param lsid
      * @return
      */
-    public String[] getTaxonSearch(String lsid) {
+    public String[] getTaxonSearch10(String lsid) {
+        return getTaxonSearch(lsid, 1.0);
+    }
+
+    public String[] getTaxonSearch20(String lsid) {
+        return getTaxonSearch(lsid, 2.0);
+    }
+
+    public String[] getTaxonSearch(String lsid, Double version) {
+        String taxon_concept_lsid = version == 1.0 ? OccurrenceIndex10.TAXON_CONCEPT_ID : OccurrenceIndex20.TAXON_CONCEPT_ID;
 
         String[] result = new String[0];
         //use the name matching index
         try {
-            if(nameIndex == null){
+            if (nameIndex == null) {
                 nameIndex = new ALANameSearcher(nameIndexLocation);
             }
             NameSearchResult nsr = nameIndex.searchForRecordByLsid(lsid);
-            if(nsr != null ){
+            if (nsr != null) {
                 String rank = nsr.getRank() != null ? nsr.getRank().toString() : "Unknown Rank";
                 String scientificName = nsr.getRankClassification() != null ? nsr.getRankClassification().getScientificName():null;
                 StringBuffer dispSB = new StringBuffer(rank + ": " + scientificName);
-                StringBuilder sb = new StringBuilder("lft:[");
-                String lft = nsr.getLeft() != null ? nsr.getLeft():"0";
+                StringBuilder sb = new StringBuilder(OccurrenceIndex.LFT + ":[");
+                String lft = nsr.getLeft() != null ? nsr.getLeft() : "0";
                 String rgt = nsr.getRight() != null ? nsr.getRight():"0";
                 sb.append(lft).append(" TO ").append(rgt).append("]");
                 return new String[]{sb.toString(), dispSB.toString()};
             } else {
-                return new String[]{"taxon_concept_lsid:\"" + ClientUtils.escapeQueryChars(lsid) + "\"", "taxon_concept_lsid:\"" + lsid + "\""};
+                return new String[]{taxon_concept_lsid + ":\"" + ClientUtils.escapeQueryChars(lsid) + "\"", taxon_concept_lsid + ":\"" + lsid + "\""};
             }
         } catch(Exception e){
             logger.error(e.getMessage(), e);
@@ -335,17 +342,20 @@ public class SearchUtils {
      * @param uid
      * @return
      */
-    public String getUidSearchField(String uid) {
-        if (uid.startsWith("co"))
-            return "collection_uid";
-        if (uid.startsWith("in"))
-            return "institution_uid";
-        if (uid.startsWith("dr"))
-            return "data_resource_uid";
-        if (uid.startsWith("dp"))
-            return "data_provider_uid";
-        if (uid.startsWith("dh"))
-            return "data_hub_uid";
+    public String getUidSearchField(String uid, Double version) {
+        if (version == 1.0) {
+            if (uid.startsWith("co")) return OccurrenceIndex10.COLLECTION_UID;
+            if (uid.startsWith("in")) return OccurrenceIndex10.INSTITUTION_UID;
+            if (uid.startsWith("dr")) return OccurrenceIndex10.DATA_RESOURCE_UID;
+            if (uid.startsWith("dp")) return OccurrenceIndex10.DATA_PROVIDER_UID;
+            if (uid.startsWith("dh")) return OccurrenceIndex10.DATA_HUB_UID;
+        } else {
+            if (uid.startsWith("co")) return OccurrenceIndex20.COLLECTION_UID;
+            if (uid.startsWith("in")) return OccurrenceIndex20.INSTITUTION_UID;
+            if (uid.startsWith("dr")) return OccurrenceIndex20.DATA_RESOURCE_UID;
+            if (uid.startsWith("dp")) return OccurrenceIndex20.DATA_PROVIDER_UID;
+            if (uid.startsWith("dh")) return OccurrenceIndex20.DATA_HUB_UID;
+        }
         return null;
     }
 
@@ -449,17 +459,6 @@ public class SearchUtils {
         for(String field : defaultParams)
             extraParams.remove(field);
         return extraParams;
-    }
-
-    private boolean isDynamicField(String fieldName){
-        return fieldName.endsWith("_s") || fieldName.endsWith("_i") || fieldName.endsWith("_d");
-    }
-
-    public static String formatDynamicFieldName(String fieldName){
-        if(fieldName.length()>2){
-            return StringUtils.capitalize(fieldName.substring(0, fieldName.length() - 2).replace("_", " "));
-        }
-        return fieldName;
     }
 
     /**

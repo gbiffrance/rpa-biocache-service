@@ -1,18 +1,21 @@
 package au.org.ala.biocache.dto;
 
 public class Comparison {
-    private String key;
+    private String name;
     private String raw;
     private String processed;
 
-    public Comparison() {};
-
-    public String getKey() {
-        return key;
+    public Comparison() {
     }
 
-    public void setKey(String key) {
-        this.key = key;
+    ;
+
+    public String getName() {
+        return name;
+    }
+
+    public void setName(String name) {
+        this.name = name;
     }
 
     public String getRaw() {
