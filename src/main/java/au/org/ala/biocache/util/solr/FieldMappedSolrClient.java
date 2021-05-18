@@ -269,7 +269,7 @@ public class FieldMappedSolrClient extends SolrClient {
 
         QueryResponse queryResponse = delegate.query(collection, translatedParams);
 
-        return new FieldMappedQueryResponse(this, translatedParams, queryResponse);
+        return new FieldMappedQueryResponse(this, translatedParams, queryResponse, fieldMappingUtil);
     }
 
     @Override
@@ -284,7 +284,7 @@ public class FieldMappedSolrClient extends SolrClient {
 
         QueryResponse queryResponse = delegate.query(collection, translatedParams, method);
 
-        return new FieldMappedQueryResponse(this, translatedParams, queryResponse);
+        return new FieldMappedQueryResponse(this, translatedParams, queryResponse, fieldMappingUtil);
     }
 
     @Override
@@ -299,7 +299,7 @@ public class FieldMappedSolrClient extends SolrClient {
 
         QueryResponse queryResponse = delegate.queryAndStreamResponse(collection, translatedParams, callback);
 
-        return new FieldMappedQueryResponse(this, translatedParams, queryResponse);
+        return new FieldMappedQueryResponse(this, translatedParams, queryResponse, fieldMappingUtil);
     }
 
     public QueryResponse queryAndStreamResponse(SolrParams params, StreamingResponseCallback callback) throws SolrServerException, IOException {

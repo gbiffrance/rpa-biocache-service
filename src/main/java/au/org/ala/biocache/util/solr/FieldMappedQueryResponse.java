@@ -20,6 +20,7 @@ public class FieldMappedQueryResponse extends QueryResponse {
     final private SolrClient solrClient;
     final private FieldMappedSolrParams solrParams;
     final private QueryResponse delegate;
+    final private FieldMappingUtil fieldMappingUtil;
 
     SolrDocumentList _results;
     private List<FacetField> _facetFields = null;
@@ -27,10 +28,11 @@ public class FieldMappedQueryResponse extends QueryResponse {
     private List<RangeFacet> _rangeFacets = null;
     private List<IntervalFacet> _intervalFacets = null;
 
-    public FieldMappedQueryResponse(SolrClient solrClient, FieldMappedSolrParams solrParams, QueryResponse delegate) {
+    public FieldMappedQueryResponse(SolrClient solrClient, FieldMappedSolrParams solrParams, QueryResponse delegate, FieldMappingUtil fieldMappingUtil) {
         this.solrClient = solrClient;
         this.solrParams = solrParams;
         this.delegate = delegate;
+        this.fieldMappingUtil = fieldMappingUtil;
     }
 
     @Override
@@ -197,7 +199,8 @@ public class FieldMappedQueryResponse extends QueryResponse {
 
                             FacetField legacyFacet = new FacetField(legacyFacetName);
                             for (FacetField.Count facetFieldCount : facetField.getValues()) {
-                                legacyFacet.add(facetFieldCount.getName(), facetFieldCount.getCount());
+                                 legacyFacet.add(fieldMappingUtil.translateQueryValueReverse(legacyFacetName, facetFieldCount.getName()),
+                                        facetFieldCount.getCount());
                             }
 
                             this._facetFields.add(legacyFacet);

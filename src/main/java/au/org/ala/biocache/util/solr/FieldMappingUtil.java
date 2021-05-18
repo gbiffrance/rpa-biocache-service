@@ -2,6 +2,7 @@ package au.org.ala.biocache.util.solr;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.collect.Maps;
+import io.reactivex.rxjava3.core.Single;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.solr.client.solrj.response.QueryResponse;
 import org.apache.solr.common.params.ModifiableSolrParams;
@@ -15,6 +16,7 @@ import java.util.*;
 import java.util.function.Consumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 @Component("fieldMappingUtil")
@@ -22,6 +24,7 @@ public class FieldMappingUtil {
 
     private Map<String, String> fieldMappings = new Hashtable<>();
     private Map<String, Map<String, String>> enumValueMappings = new Hashtable<>();
+    private Map<String, Map<String, String>> enumValueMappingsReverse = new Hashtable<>();
 
     @Value("${solr.pipelines.field.config:/data/biocache/config/pipelines-field-config.json}")
     void setPipelinesFieldConfig(String pipelinesFieldConfig) throws IOException {
@@ -33,6 +36,20 @@ public class FieldMappingUtil {
 
             fieldMappings = (Map<String, String>) fieldConfig.get("fieldNameMapping");
             enumValueMappings = (Map<String, Map<String, String>>) fieldConfig.get("fieldValueMapping");
+
+            enumValueMappingsReverse = new Hashtable<>();
+            for (Map.Entry<String, Map<String, String>> entry : enumValueMappings.entrySet()) {
+                Map<String, String> reverse = new Hashtable<>();
+                for (Map.Entry<String, String> value : entry.getValue().entrySet()) {
+                    reverse.put(value.getValue(), value.getKey());
+                }
+                // use old keys
+                for (Map.Entry<String, String> fm : fieldMappings.entrySet()) {
+                    if (fm.getValue() != null && fm.getValue().equals(entry.getKey())) {
+                        enumValueMappingsReverse.put(fm.getKey(), reverse);
+                    }
+                }
+            }
         }
     }
 
@@ -122,13 +139,21 @@ public class FieldMappingUtil {
         return query;
     }
 
-    private String translateQueryValue(String term, String value) {
+    public String translateQueryValue(String term, String oldValue) {
+        return translateQueryValue(term, oldValue, enumValueMappings);
+    }
 
-        if (enumValueMappings == null || term == null) {
+    public String translateQueryValueReverse(String term, String newValue) {
+        return translateQueryValue(term, newValue, enumValueMappingsReverse);
+    }
+
+    private String translateQueryValue(String term, String value, Map<String, Map<String, String>> valueMap) {
+
+        if (valueMap == null || term == null) {
             return value;
         }
 
-        Map<String, String> enumValueMapping = enumValueMappings.get(term);
+        Map<String, String> enumValueMapping = valueMap.get(term);
         if (enumValueMapping != null) {
 
             Matcher matcher = ENUM_VALUE_PATTERN.matcher(value);
