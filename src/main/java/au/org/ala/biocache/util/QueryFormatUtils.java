@@ -1030,7 +1030,7 @@ public class QueryFormatUtils {
      * @return
      */
     private String prepareSolrStringForReplacement(String value, boolean forMatcher) {
-        if (value.equals("*")) {
+        if (value.equals("*") || value.endsWith("*")) {
             return value;
         }
         StringBuffer sb = new StringBuffer();
